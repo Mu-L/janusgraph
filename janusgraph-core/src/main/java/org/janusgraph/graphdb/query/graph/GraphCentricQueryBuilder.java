@@ -15,27 +15,46 @@
 package org.janusgraph.graphdb.query.graph;
 
 import com.google.common.base.Preconditions;
-import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
-import org.janusgraph.core.*;
+import org.janusgraph.core.Cardinality;
+import org.janusgraph.core.JanusGraphEdge;
+import org.janusgraph.core.JanusGraphElement;
+import org.janusgraph.core.JanusGraphQuery;
+import org.janusgraph.core.JanusGraphVertex;
+import org.janusgraph.core.JanusGraphVertexProperty;
+import org.janusgraph.core.PropertyKey;
 import org.janusgraph.core.attribute.Cmp;
 import org.janusgraph.core.attribute.Contain;
+import org.janusgraph.diskstorage.configuration.Configuration;
+import org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration;
 import org.janusgraph.graphdb.database.IndexSerializer;
-import org.janusgraph.graphdb.query.index.IndexSelectionStrategy;
 import org.janusgraph.graphdb.internal.ElementCategory;
 import org.janusgraph.graphdb.internal.Order;
 import org.janusgraph.graphdb.internal.OrderList;
-import org.janusgraph.graphdb.query.*;
-import org.janusgraph.graphdb.query.condition.*;
-import org.janusgraph.graphdb.query.index.IndexSelectionUtil;
+import org.janusgraph.graphdb.query.BackendQueryHolder;
+import org.janusgraph.graphdb.query.JanusGraphPredicate;
+import org.janusgraph.graphdb.query.Query;
+import org.janusgraph.graphdb.query.QueryProcessor;
+import org.janusgraph.graphdb.query.QueryUtil;
+import org.janusgraph.graphdb.query.condition.And;
+import org.janusgraph.graphdb.query.condition.Condition;
+import org.janusgraph.graphdb.query.condition.MultiCondition;
+import org.janusgraph.graphdb.query.condition.Or;
+import org.janusgraph.graphdb.query.condition.PredicateCondition;
+import org.janusgraph.graphdb.query.index.IndexSelectionStrategy;
 import org.janusgraph.graphdb.query.profile.QueryProfiler;
 import org.janusgraph.graphdb.transaction.StandardJanusGraphTx;
-import org.janusgraph.graphdb.types.*;
 import org.janusgraph.graphdb.util.CloseableIteratorUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.function.Predicate;
+
+import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.ADJUST_LIMIT;
+import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.HARD_MAX_LIMIT;
 
 /**
  * Builds a {@link JanusGraphQuery}, optimizes the query and compiles the result into a {@link GraphCentricQuery} which
@@ -80,6 +99,10 @@ public class GraphCentricQueryBuilder implements JanusGraphQuery<GraphCentricQue
      */
     private boolean useSmartLimit;
     /**
+     * The hard max limit of each query
+     */
+    private int hardMaxLimit;
+    /**
      * Selection service for the best combination of indexes to be queried
      */
     private IndexSelectionStrategy indexSelector;
@@ -87,7 +110,10 @@ public class GraphCentricQueryBuilder implements JanusGraphQuery<GraphCentricQue
     public GraphCentricQueryBuilder(StandardJanusGraphTx tx, IndexSerializer serializer, IndexSelectionStrategy indexSelector) {
         Preconditions.checkNotNull(tx);
         Preconditions.checkNotNull(serializer);
-        useSmartLimit = tx.getGraph().getConfiguration().adjustQueryLimit();
+        Configuration customOptions = tx.getConfiguration().getCustomOptions();
+        GraphDatabaseConfiguration graphConfigs = tx.getGraph().getConfiguration();
+        useSmartLimit = customOptions.has(ADJUST_LIMIT) ? customOptions.get(ADJUST_LIMIT) : graphConfigs.adjustQueryLimit();
+        hardMaxLimit = customOptions.has(HARD_MAX_LIMIT) ? customOptions.get(HARD_MAX_LIMIT) : graphConfigs.getHardMaxLimit();
         this.tx = tx;
         this.serializer = serializer;
         this.indexSelector = indexSelector;
@@ -205,14 +231,8 @@ public class GraphCentricQueryBuilder implements JanusGraphQuery<GraphCentricQue
     }
 
     public <E extends JanusGraphElement> Iterable<E> iterables(final GraphCentricQuery query, final Class<E> aClass) {
-        return new Iterable<E>() {
-            @Override
-            public CloseableIterator<E> iterator() {
-                return CloseableIteratorUtils.filter(new QueryProcessor(query, tx.elementProcessor).iterator(),
-                    (Predicate<? super E>) e -> aClass.isInstance(e));
-            }
-
-        };
+        return () -> CloseableIteratorUtils.filter(new QueryProcessor(query, tx.elementProcessor).iterator(),
+            (Predicate<? super E>) aClass::isInstance);
     }
 
 
@@ -223,7 +243,6 @@ public class GraphCentricQueryBuilder implements JanusGraphQuery<GraphCentricQue
 
     private static final int DEFAULT_NO_LIMIT = 1000;
     private static final int MAX_BASE_LIMIT = 20000;
-    private static final int HARD_MAX_LIMIT = 100000;
 
     public GraphCentricQuery constructQuery(final ElementCategory resultType) {
         final QueryProfiler optProfiler = profiler.addNested(QueryProfiler.OPTIMIZATION);
@@ -244,7 +263,7 @@ public class GraphCentricQueryBuilder implements JanusGraphQuery<GraphCentricQue
         //Prepare constraints
         final MultiCondition<JanusGraphElement> conditions;
         if (this.globalConstraints.size() == 1) {
-            conditions = QueryUtil.constraints2QNF(tx, constraints);
+            conditions = QueryUtil.constraints2QNF(tx, globalConstraints.get(0));
             if (conditions == null) return GraphCentricQuery.emptyQuery(resultType);
         } else {
             conditions = new Or<>();
@@ -259,25 +278,22 @@ public class GraphCentricQueryBuilder implements JanusGraphQuery<GraphCentricQue
         orders.makeImmutable();
         if (orders.isEmpty()) orders = OrderList.NO_ORDER;
 
-        //Compile all indexes that cover at least one of the query conditions
-        final Set<IndexType> indexCandidates = IndexSelectionUtil.getMatchingIndexes(conditions,
-            indexType -> indexType.getElement() == resultType
-                    && !(conditions instanceof Or && (indexType.isCompositeIndex() || !serializer.features((MixedIndexType) indexType).supportNotQueryNormalForm()))
-        );
-
         final Set<Condition> coveredClauses = new HashSet<>();
-        final IndexSelectionStrategy.SelectedIndexQuery selectedIndex = indexSelector.selectIndices(indexCandidates, conditions, coveredClauses, orders, serializer);
+        final IndexSelectionStrategy.SelectedIndexQuery selectedIndex = indexSelector.selectIndices(
+            resultType, conditions, coveredClauses, orders, serializer);
 
         BackendQueryHolder<JointIndexQuery> query;
         if (!coveredClauses.isEmpty()) {
-            int indexLimit = limit == Query.NO_LIMIT ? HARD_MAX_LIMIT : limit;
+            int indexLimit;
             if (useSmartLimit) {
                 indexLimit = limit == Query.NO_LIMIT ? DEFAULT_NO_LIMIT : Math.min(MAX_BASE_LIMIT, limit);
+            } else {
+                indexLimit = limit == Query.NO_LIMIT ? hardMaxLimit : limit;
             }
-            indexLimit = Math.min(HARD_MAX_LIMIT,
+            indexLimit = Math.min(hardMaxLimit,
                 QueryUtil.adjustLimitForTxModifications(tx, conditions.numChildren() - coveredClauses.size(), indexLimit));
             query = new BackendQueryHolder<>(selectedIndex.getQuery().updateLimit(indexLimit),
-                    coveredClauses.size() == conditions.numChildren(), selectedIndex.isSorted());
+                    coveredClauses.size() == conditions.numChildren() || coveredClauses.contains(conditions), selectedIndex.isSorted());
         } else {
             query = new BackendQueryHolder<>(new JointIndexQuery(), false, selectedIndex.isSorted());
         }

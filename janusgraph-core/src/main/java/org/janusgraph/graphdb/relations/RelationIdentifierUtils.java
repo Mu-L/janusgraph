@@ -21,7 +21,6 @@ import org.janusgraph.core.JanusGraphTransaction;
 import org.janusgraph.core.JanusGraphVertex;
 import org.janusgraph.core.JanusGraphVertexProperty;
 import org.janusgraph.core.RelationType;
-import org.janusgraph.core.PropertyKey;
 import org.janusgraph.core.schema.ConsistencyModifier;
 import org.janusgraph.graphdb.internal.InternalRelation;
 import org.janusgraph.graphdb.internal.InternalRelationType;
@@ -62,7 +61,7 @@ public class RelationIdentifierUtils {
         if (typeVertex.isEdgeLabel()) {
             return findEdgeRelations(v, typeVertex, rId, tx);
         } else {
-            return ((VertexCentricQueryBuilder) v.query()).noPartitionRestriction().types((PropertyKey) typeVertex).properties();
+            return ((VertexCentricQueryBuilder) v.query()).noPartitionRestriction().types(typeVertex).properties();
         }
     }
 

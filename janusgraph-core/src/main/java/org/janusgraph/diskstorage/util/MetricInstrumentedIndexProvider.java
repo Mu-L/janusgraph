@@ -14,6 +14,7 @@
 
 package org.janusgraph.diskstorage.util;
 
+import com.codahale.metrics.Timer;
 import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.diskstorage.BaseTransaction;
 import org.janusgraph.diskstorage.BaseTransactionConfig;
@@ -28,8 +29,6 @@ import org.janusgraph.diskstorage.indexing.RawQuery;
 import org.janusgraph.graphdb.query.JanusGraphPredicate;
 import org.janusgraph.util.stats.MetricManager;
 
-import com.codahale.metrics.Timer;
-
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -43,13 +42,14 @@ public class MetricInstrumentedIndexProvider implements IndexProvider {
     public static final String M_MUTATE = "mutate";
     public static final String M_RESTORE = "restore";
     public static final String M_QUERY = "query";
+    public static final String M_MIXED_COUNT_QUERY = "mixedIndexCountQuery";
     public static final String M_RAW_QUERY = "rawQuery";
     public static final String M_TOTALS = "totals";
     public static final String M_CALLS = "calls";
     public static final String M_TIME = "time";
     public static final String M_EXCEPTIONS = "exceptions";
     public static final List<String> OPERATION_NAMES = Collections.unmodifiableList(
-        Arrays.asList(M_MUTATE, M_RESTORE, M_QUERY, M_RAW_QUERY, M_TOTALS));
+        Arrays.asList(M_MUTATE, M_RESTORE, M_QUERY, M_MIXED_COUNT_QUERY, M_RAW_QUERY, M_TOTALS));
 
     public MetricInstrumentedIndexProvider(final IndexProvider indexProvider, String prefix) {
         this.indexProvider = indexProvider;
@@ -72,6 +72,11 @@ public class MetricInstrumentedIndexProvider implements IndexProvider {
         final Map<String, Map<String, List<IndexEntry>>> documents, final KeyInformation.IndexRetriever information,
         final BaseTransaction tx) throws BackendException {
         runWithMetrics((BaseTransactionConfigurable) tx, M_RESTORE, () -> indexProvider.restore(documents, information, tx));
+    }
+
+    @Override
+    public Long queryCount(IndexQuery query, KeyInformation.IndexRetriever information, BaseTransaction tx) throws BackendException {
+        return runWithMetrics((BaseTransactionConfigurable) tx, M_MIXED_COUNT_QUERY, () -> indexProvider.queryCount(query, information, tx));
     }
 
     @Override

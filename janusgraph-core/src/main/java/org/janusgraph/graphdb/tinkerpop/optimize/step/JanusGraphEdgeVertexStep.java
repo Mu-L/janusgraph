@@ -14,11 +14,6 @@
 
 package org.janusgraph.graphdb.tinkerpop.optimize.step;
 
-import org.janusgraph.core.JanusGraphMultiVertexQuery;
-import org.janusgraph.graphdb.query.profile.QueryProfiler;
-import org.janusgraph.graphdb.query.vertex.BasicVertexCentricQueryBuilder;
-import org.janusgraph.graphdb.tinkerpop.optimize.JanusGraphTraversalUtil;
-import org.janusgraph.graphdb.tinkerpop.profile.TP3ProfileWrapper;
 import org.apache.tinkerpop.gremlin.process.traversal.Traverser;
 import org.apache.tinkerpop.gremlin.process.traversal.step.Profiling;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.EdgeVertexStep;
@@ -27,6 +22,11 @@ import org.apache.tinkerpop.gremlin.process.traversal.util.MutableMetrics;
 import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
+import org.janusgraph.core.JanusGraphMultiVertexQuery;
+import org.janusgraph.graphdb.query.profile.QueryProfiler;
+import org.janusgraph.graphdb.query.vertex.BasicVertexCentricQueryBuilder;
+import org.janusgraph.graphdb.tinkerpop.optimize.JanusGraphTraversalUtil;
+import org.janusgraph.graphdb.tinkerpop.profile.TP3ProfileWrapper;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -58,20 +58,30 @@ public class JanusGraphEdgeVertexStep extends EdgeVertexStep implements Profilin
         if (!starts.hasNext()) {
             throw FastNoSuchElementException.instance();
         }
+
+        if(txVertexCacheSize < 2){
+            return;
+        }
+
         List<Traverser.Admin<Edge>> edges = new ArrayList<>();
         Set<Vertex> vertices = new HashSet<>();
-        starts.forEachRemaining(e -> {
+
+        do{
+            Traverser.Admin<Edge> e = starts.next();
             edges.add(e);
 
-            if (vertices.size() < txVertexCacheSize) {
-                if (Direction.IN.equals(direction) || Direction.BOTH.equals(direction)) {
+            if(vertices.size() < txVertexCacheSize){
+                if(Direction.IN.equals(direction)){
                     vertices.add(e.get().inVertex());
-                }
-                if (Direction.OUT.equals(direction) || Direction.BOTH.equals(direction)) {
+                } else if(Direction.OUT.equals(direction)){
+                    vertices.add(e.get().outVertex());
+                } else if(Direction.BOTH.equals(direction)){
+                    vertices.add(e.get().inVertex());
                     vertices.add(e.get().outVertex());
                 }
             }
-        });
+
+        } while (starts.hasNext());
 
         // If there are multiple vertices then fetch the properties for all of them in a single multiQuery to
         // populate the vertex cache so subsequent queries of properties don't have to go to the storage back end

@@ -14,31 +14,28 @@
 
 package org.janusgraph.graphdb.management;
 
+import org.apache.tinkerpop.gremlin.groovy.engine.GremlinExecutor;
 import org.apache.tinkerpop.gremlin.jsr223.GremlinScriptEngineManager;
-import org.janusgraph.graphdb.database.StandardJanusGraph;
-import org.janusgraph.core.JanusGraphFactory;
-import org.janusgraph.core.ConfiguredGraphFactory;
-
-import org.apache.tinkerpop.gremlin.structure.Graph;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalSource;
 import org.apache.tinkerpop.gremlin.server.GraphManager;
 import org.apache.tinkerpop.gremlin.server.Settings;
-import org.apache.tinkerpop.gremlin.groovy.engine.GremlinExecutor;
+import org.apache.tinkerpop.gremlin.structure.Graph;
+import org.janusgraph.core.ConfiguredGraphFactory;
+import org.janusgraph.core.JanusGraphFactory;
+import org.janusgraph.graphdb.database.StandardJanusGraph;
 import org.janusgraph.graphdb.management.utils.JanusGraphManagerException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-
 import java.util.function.Function;
-import java.util.Set;
-import java.util.Map;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import javax.script.SimpleBindings;
 import javax.script.Bindings;
+import javax.script.SimpleBindings;
 
 /**
  * This class adheres to the TinkerPop graphManager specifications. It provides a coordinated
@@ -74,7 +71,7 @@ public class JanusGraphManager implements GraphManager {
         // Open graphs defined at server start in settings.graphs
         settings.graphs.forEach((key, value) -> {
             final StandardJanusGraph graph = (StandardJanusGraph) JanusGraphFactory.open(value, key);
-            if (key.toLowerCase().equals(CONFIGURATION_MANAGEMENT_GRAPH_KEY.toLowerCase())) {
+            if (key.equalsIgnoreCase(CONFIGURATION_MANAGEMENT_GRAPH_KEY)) {
                 new ConfigurationManagementGraph(graph);
             }
         });
@@ -93,12 +90,8 @@ public class JanusGraphManager implements GraphManager {
     }
 
     // To be used for testing purposes only, so we can run tests in parallel
-    public static JanusGraphManager getInstance(boolean forceCreate) {
-        if (forceCreate) {
-            return new JanusGraphManager(new Settings());
-        } else {
-            return instance;
-        }
+    public static void resetInstance() {
+        instance = null;
     }
 
     public void configureGremlinExecutor(GremlinExecutor gremlinExecutor) {
@@ -127,7 +120,7 @@ public class JanusGraphManager implements GraphManager {
                 } catch (Exception e) {
                     // cannot open graph, do nothing
                     log.error(String.format("Failed to open graph %s with the following error:\n %s.\n" +
-                    "Thus, it and its traversal will not be bound on this server.", it, e.toString()));
+                    "Thus, it and its traversal will not be bound on this server.", it, e));
                 }
             });
         }

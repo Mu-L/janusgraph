@@ -19,9 +19,11 @@ import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import org.apache.tinkerpop.gremlin.server.GraphManager;
 import org.apache.tinkerpop.gremlin.server.GremlinServer;
-import org.apache.tinkerpop.gremlin.server.Settings;
+import org.apache.tinkerpop.gremlin.server.util.ServerGremlinExecutor;
+import org.janusgraph.graphdb.grpc.JanusGraphContextHandler;
 import org.janusgraph.graphdb.grpc.JanusGraphManagerServiceImpl;
-import org.janusgraph.graphdb.server.utils.GremlinSettingsUtils;
+import org.janusgraph.graphdb.grpc.schema.SchemaManagerImpl;
+import org.janusgraph.graphdb.management.JanusGraphManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,7 +33,6 @@ import java.util.concurrent.CompletableFuture;
 public class JanusGraphServer {
     private static final Logger logger = LoggerFactory.getLogger(JanusGraphServer.class);
     private GremlinServer gremlinServer = null;
-    private Settings gremlinSettings = null;
     private JanusGraphSettings janusGraphSettings = null;
     private final String confPath;
     private CompletableFuture<Void> serverStarted = null;
@@ -60,18 +61,16 @@ public class JanusGraphServer {
         return gremlinServer;
     }
 
-    public Settings getGremlinSettings() {
-        return gremlinSettings;
-    }
-
     public JanusGraphSettings getJanusGraphSettings() {
         return janusGraphSettings;
     }
 
     private Server createGrpcServer(JanusGraphSettings janusGraphSettings, GraphManager graphManager) {
+        JanusGraphContextHandler janusGraphContextHandler = new JanusGraphContextHandler(graphManager);
         return ServerBuilder
             .forPort(janusGraphSettings.getGrpcServer().getPort())
-            .addService(new JanusGraphManagerServiceImpl(graphManager))
+            .addService(new JanusGraphManagerServiceImpl(janusGraphContextHandler))
+            .addService(new SchemaManagerImpl(janusGraphContextHandler))
             .build();
     }
 
@@ -83,8 +82,7 @@ public class JanusGraphServer {
         try {
             logger.info("Configuring JanusGraph Server from {}", confPath);
             janusGraphSettings = JanusGraphSettings.read(confPath);
-            gremlinSettings = GremlinSettingsUtils.configureDefaultSerializersIfNotSet(janusGraphSettings.getGremlinSettings());
-            gremlinServer = new GremlinServer(gremlinSettings);
+            gremlinServer = new GremlinServer(janusGraphSettings);
             CompletableFuture<Void> grpcServerFuture = CompletableFuture.completedFuture(null);
             if (janusGraphSettings.getGrpcServer().isEnabled()) {
                 grpcServerFuture = CompletableFuture.runAsync(() -> {
@@ -97,11 +95,21 @@ public class JanusGraphServer {
                     }
                 });
             }
-            serverStarted = CompletableFuture.allOf(gremlinServer.start(), grpcServerFuture);
+            CompletableFuture<Void> gremlinServerFuture = gremlinServer.start()
+                .thenAcceptAsync(JanusGraphServer::configure);
+            serverStarted = CompletableFuture.allOf(gremlinServerFuture, grpcServerFuture);
         } catch (Exception ex) {
             serverStarted.completeExceptionally(ex);
         }
         return serverStarted;
+    }
+
+    private static void configure(ServerGremlinExecutor serverGremlinExecutor) {
+        GraphManager graphManager = serverGremlinExecutor.getGraphManager();
+        if (!(graphManager instanceof JanusGraphManager)){
+            return;
+        }
+        ((JanusGraphManager) graphManager).configureGremlinExecutor(serverGremlinExecutor.getGremlinExecutor());
     }
 
     public synchronized CompletableFuture<Void> stop() {

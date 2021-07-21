@@ -16,9 +16,9 @@ package org.janusgraph.graphdb.query.condition;
 
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
 import org.janusgraph.core.JanusGraphElement;
 
+import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 /**
@@ -69,7 +69,7 @@ public class ConditionUtil {
     }
 
     public static <E extends JanusGraphElement> void traversal(Condition<E> condition, Predicate<Condition<E>> evaluator) {
-        Preconditions.checkArgument(!evaluator.apply(condition)
+        Preconditions.checkArgument(!evaluator.test(condition)
             || condition.getType() == Condition.Type.LITERAL
             || condition instanceof Not
             || condition instanceof MultiCondition, "Unexpected condition type: %s", condition);

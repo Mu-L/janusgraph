@@ -14,32 +14,30 @@
 
 package org.janusgraph.graphdb;
 
-import static org.janusgraph.testutil.JanusGraphAssert.assertCount;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.apache.commons.math.stat.descriptive.SummaryStatistics;
+import org.apache.tinkerpop.gremlin.structure.Direction;
+import org.apache.tinkerpop.gremlin.structure.Edge;
+import org.apache.tinkerpop.gremlin.structure.Vertex;
+import org.apache.tinkerpop.gremlin.structure.VertexProperty;
+import org.janusgraph.TestCategory;
+import org.janusgraph.core.JanusGraphEdge;
+import org.janusgraph.core.JanusGraphTransaction;
+import org.janusgraph.core.JanusGraphVertex;
+import org.janusgraph.core.PropertyKey;
+import org.janusgraph.testutil.JUnitBenchmarkProvider;
+import org.janusgraph.testutil.MemoryAssess;
+import org.junit.Rule;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.rules.TestRule;
 
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.commons.math.stat.descriptive.SummaryStatistics;
-
-import org.apache.tinkerpop.gremlin.structure.Direction;
-import org.apache.tinkerpop.gremlin.structure.Edge;
-import org.apache.tinkerpop.gremlin.structure.Vertex;
-import org.apache.tinkerpop.gremlin.structure.VertexProperty;
-import org.junit.Rule;
-import org.junit.rules.TestRule;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-
-import org.janusgraph.core.PropertyKey;
-import org.janusgraph.core.JanusGraphEdge;
-import org.janusgraph.core.JanusGraphTransaction;
-import org.janusgraph.core.JanusGraphVertex;
-import org.janusgraph.TestCategory;
-import org.janusgraph.testutil.JUnitBenchmarkProvider;
-import org.janusgraph.testutil.MemoryAssess;
+import static org.janusgraph.testutil.JanusGraphAssert.assertCount;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * These tests focus on the in-memory data structures of individual transactions and how they hold up to high memory pressure
  */
@@ -159,9 +157,9 @@ public abstract class JanusGraphPerformanceMemoryTest extends JanusGraphBaseTest
                     JanusGraphVertex v = getVertex(tx,"uid", random.nextInt(maxUID) + 1);
                     assertCount(2, v.properties());
                     int count = 0;
-                    for (Object e : v.query().direction(Direction.BOTH).edges()) {
+                    for (JanusGraphEdge e : v.query().direction(Direction.BOTH).edges()) {
                         count++;
-                        assertTrue(((JanusGraphEdge) e).<Integer>value("time") >= 0);
+                        assertTrue(e.<Integer>value("time") >= 0);
                     }
                     assertTrue(count <= 2);
 //                        if (t%(trials/10)==0) System.out.println(t);

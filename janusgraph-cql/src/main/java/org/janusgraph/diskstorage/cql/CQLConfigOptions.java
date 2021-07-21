@@ -134,6 +134,20 @@ public interface CQLConfigOptions {
             ConfigOption.Type.FIXED,
             String[].class);
 
+    ConfigOption<String> SPECULATIVE_RETRY = new ConfigOption<>(
+        CQL_NS,
+        "speculative-retry",
+        "The speculative retry policy. One of: NONE, ALWAYS, <X>percentile, <N>ms.",
+        ConfigOption.Type.FIXED,
+        String.class);
+
+    ConfigOption<Integer> GC_GRACE_SECONDS = new ConfigOption<>(
+        CQL_NS,
+        "gc-grace-seconds",
+        "The number of seconds before tombstones (deletion markers) are eligible for garbage-collection.",
+        ConfigOption.Type.FIXED,
+        Integer.class);
+
     // Compression
     ConfigOption<Boolean> CF_COMPRESSION = new ConfigOption<>(
             CQL_NS,
@@ -162,21 +176,21 @@ public interface CQLConfigOptions {
             CQL_NS,
             "local-max-connections-per-host",
             "The maximum number of connections that can be created per host for local datacenter",
-            ConfigOption.Type.FIXED,
+            ConfigOption.Type.MASKABLE,
             1);
 
     ConfigOption<Integer> REMOTE_MAX_CONNECTIONS_PER_HOST = new ConfigOption<>(
             CQL_NS,
             "remote-max-connections-per-host",
             "The maximum number of connections that can be created per host for remote datacenter",
-            ConfigOption.Type.FIXED,
+            ConfigOption.Type.MASKABLE,
             1);
 
     ConfigOption<Integer> MAX_REQUESTS_PER_CONNECTION = new ConfigOption<>(
             CQL_NS,
             "max-requests-per-connection",
             "The maximum number of requests that can be executed concurrently on a connection.",
-            ConfigOption.Type.FIXED,
+            ConfigOption.Type.MASKABLE,
             1024);
 
     ConfigOption<Long> HEARTBEAT_INTERVAL = new ConfigOption<>(
@@ -193,6 +207,29 @@ public interface CQLConfigOptions {
         ConfigOption.Type.MASKABLE,
         Long.class);
 
+    ConfigOption<String> PARTITIONER_NAME = new ConfigOption<>(
+        CQL_NS,
+        "partitioner-name",
+        "The name of Cassandra cluster's partitioner. It will be retrieved by client if not provided. " +
+            "If provided, it must match the cluster's partitioner name. It can be the full class name such as " +
+            "`org.apache.cassandra.dht.ByteOrderedPartitioner` or the simple name such as `ByteOrderedPartitioner`",
+        ConfigOption.Type.MASKABLE,
+        String.class);
+
+    ConfigOption<Boolean> METADATA_SCHEMA_ENABLED = new ConfigOption<>(
+        CQL_NS,
+        "metadata-schema-enabled",
+        "Whether schema metadata is enabled.",
+        ConfigOption.Type.MASKABLE,
+        Boolean.class);
+
+    ConfigOption<Boolean> METADATA_TOKEN_MAP_ENABLED = new ConfigOption<>(
+        CQL_NS,
+        "metadata-token-map-enabled",
+        "Whether token metadata is enabled. If disabled, partitioner-name must be provided.",
+        ConfigOption.Type.MASKABLE,
+        Boolean.class);
+
     // SSL
     ConfigNamespace SSL_NS = new ConfigNamespace(
             CQL_NS,
@@ -200,8 +237,8 @@ public interface CQLConfigOptions {
             "Configuration options for SSL");
 
     ConfigNamespace SSL_KEYSTORE_NS = new ConfigNamespace(
-            SSL_NS, 
-            "keystore", 
+            SSL_NS,
+            "keystore",
             "Configuration options for SSL Keystore.");
 
     ConfigNamespace SSL_TRUSTSTORE_NS = new ConfigNamespace(
@@ -236,21 +273,21 @@ public interface CQLConfigOptions {
             "Marks the location of the SSL Keystore.",
             ConfigOption.Type.LOCAL,
             "");
-    
+
     ConfigOption<String> SSL_KEYSTORE_KEY_PASSWORD = new ConfigOption<>(
             SSL_KEYSTORE_NS,
             "keypassword",
             "The password to access the key in SSL Keystore.",
             ConfigOption.Type.LOCAL,
             "");
-    
+
     ConfigOption<String> SSL_KEYSTORE_STORE_PASSWORD = new ConfigOption<>(
             SSL_KEYSTORE_NS,
             "storepassword",
             "The password to access the SSL Keystore.",
             ConfigOption.Type.LOCAL,
             "");
-    
+
     ConfigOption<String> SSL_TRUSTSTORE_LOCATION = new ConfigOption<>(
             SSL_TRUSTSTORE_NS,
             "location",
@@ -479,7 +516,7 @@ public interface CQLConfigOptions {
         REQUEST_TRACKER,
         "logs-success-enabled",
         "Whether to log successful requests. " +
-            "Can be used when `" + REQUEST_TRACKER_CLASS.toString() + "` is set to `RequestLogger`.",
+            "Can be used when `" + REQUEST_TRACKER_CLASS + "` is set to `RequestLogger`.",
         ConfigOption.Type.LOCAL,
         Boolean.class);
 
@@ -487,7 +524,7 @@ public interface CQLConfigOptions {
         REQUEST_TRACKER,
         "logs-slow-threshold",
         "The threshold to classify a successful request as `slow`. In milliseconds. " +
-            "Can be used when `" + REQUEST_TRACKER_CLASS.toString() + "` is set to `RequestLogger`.",
+            "Can be used when `" + REQUEST_TRACKER_CLASS + "` is set to `RequestLogger`.",
         ConfigOption.Type.LOCAL,
         Long.class);
 
@@ -495,7 +532,7 @@ public interface CQLConfigOptions {
         REQUEST_TRACKER,
         "logs-slow-enabled",
         "Whether to log `slow` requests." +
-            "Can be used when `" + REQUEST_TRACKER_CLASS.toString() + "` is set to `RequestLogger`.",
+            "Can be used when `" + REQUEST_TRACKER_CLASS + "` is set to `RequestLogger`.",
         ConfigOption.Type.LOCAL,
         Boolean.class);
 
@@ -503,7 +540,7 @@ public interface CQLConfigOptions {
         REQUEST_TRACKER,
         "logs-error-enabled",
         "Whether to log failed requests." +
-            "Can be used when `" + REQUEST_TRACKER_CLASS.toString() + "` is set to `RequestLogger`.",
+            "Can be used when `" + REQUEST_TRACKER_CLASS + "` is set to `RequestLogger`.",
         ConfigOption.Type.LOCAL,
         Boolean.class);
 
@@ -511,7 +548,7 @@ public interface CQLConfigOptions {
         REQUEST_TRACKER,
         "logs-max-query-length",
         "The maximum length of the query string in the log message. " +
-            "Can be used when `" + REQUEST_TRACKER_CLASS.toString() + "` is set to `RequestLogger`.",
+            "Can be used when `" + REQUEST_TRACKER_CLASS + "` is set to `RequestLogger`.",
         ConfigOption.Type.LOCAL,
         Integer.class);
 
@@ -519,7 +556,7 @@ public interface CQLConfigOptions {
         REQUEST_TRACKER,
         "logs-show-values",
         "Whether to log bound values in addition to the query string. " +
-            "Can be used when `" + REQUEST_TRACKER_CLASS.toString() + "` is set to `RequestLogger`.",
+            "Can be used when `" + REQUEST_TRACKER_CLASS + "` is set to `RequestLogger`.",
         ConfigOption.Type.LOCAL,
         Boolean.class);
 
@@ -527,7 +564,7 @@ public interface CQLConfigOptions {
         REQUEST_TRACKER,
         "logs-max-value-length",
         "The maximum length for bound values in the log message. " +
-            "Can be used when `" + REQUEST_TRACKER_CLASS.toString() + "` is set to `RequestLogger`.",
+            "Can be used when `" + REQUEST_TRACKER_CLASS + "` is set to `RequestLogger`.",
         ConfigOption.Type.LOCAL,
         Integer.class);
 
@@ -535,7 +572,7 @@ public interface CQLConfigOptions {
         REQUEST_TRACKER,
         "logs-max-values",
         "The maximum number of bound values to log. " +
-            "Can be used when `" + REQUEST_TRACKER_CLASS.toString() + "` is set to `RequestLogger`.",
+            "Can be used when `" + REQUEST_TRACKER_CLASS + "` is set to `RequestLogger`.",
         ConfigOption.Type.LOCAL,
         Integer.class);
 
@@ -543,7 +580,45 @@ public interface CQLConfigOptions {
         REQUEST_TRACKER,
         "logs-show-stack-traces",
         "Whether to log stack traces for failed queries. " +
-            "Can be used when `" + REQUEST_TRACKER_CLASS.toString() + "` is set to `RequestLogger`.",
+            "Can be used when `" + REQUEST_TRACKER_CLASS + "` is set to `RequestLogger`.",
         ConfigOption.Type.LOCAL,
         Boolean.class);
+
+    ConfigNamespace EXECUTOR_SERVICE = new ConfigNamespace(
+        CQL_NS,
+        "executor-service",
+        "Configuration options for CQL executor service which is used to process CQL queries.");
+
+    ConfigOption<Integer> EXECUTOR_SERVICE_CORE_POOL_SIZE = new ConfigOption<>(
+        EXECUTOR_SERVICE,
+        GraphDatabaseConfiguration.PARALLEL_BACKEND_EXECUTOR_SERVICE_CORE_POOL_SIZE.getName(),
+        "Core pool size for executor service. May be ignored if custom executor service is used " +
+            "(depending on the implementation of the executor service).",
+        ConfigOption.Type.LOCAL,
+        Integer.class,
+        10);
+
+    ConfigOption<Integer> EXECUTOR_SERVICE_MAX_POOL_SIZE = new ConfigOption<>(
+        EXECUTOR_SERVICE,
+        GraphDatabaseConfiguration.PARALLEL_BACKEND_EXECUTOR_SERVICE_MAX_POOL_SIZE.getName(),
+        GraphDatabaseConfiguration.PARALLEL_BACKEND_EXECUTOR_SERVICE_MAX_POOL_SIZE.getDescription(),
+        ConfigOption.Type.LOCAL,
+        Integer.class,
+        Integer.MAX_VALUE);
+
+    ConfigOption<Long> EXECUTOR_SERVICE_KEEP_ALIVE_TIME = new ConfigOption<>(
+        EXECUTOR_SERVICE,
+        GraphDatabaseConfiguration.PARALLEL_BACKEND_EXECUTOR_SERVICE_KEEP_ALIVE_TIME.getName(),
+        GraphDatabaseConfiguration.PARALLEL_BACKEND_EXECUTOR_SERVICE_KEEP_ALIVE_TIME.getDescription(),
+        ConfigOption.Type.LOCAL,
+        Long.class,
+        60000L);
+
+    ConfigOption<String> EXECUTOR_SERVICE_CLASS = new ConfigOption<>(
+        EXECUTOR_SERVICE,
+        GraphDatabaseConfiguration.PARALLEL_BACKEND_EXECUTOR_SERVICE_CLASS.getName(),
+        GraphDatabaseConfiguration.PARALLEL_BACKEND_EXECUTOR_SERVICE_CLASS.getDescription(),
+        ConfigOption.Type.LOCAL,
+        String.class,
+        "fixed");
 }

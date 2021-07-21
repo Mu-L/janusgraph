@@ -14,7 +14,7 @@
 
 package org.janusgraph.core;
 
-import org.apache.commons.configuration.MapConfiguration;
+import org.apache.commons.configuration2.MapConfiguration;
 import org.apache.tinkerpop.gremlin.groovy.engine.GremlinExecutor;
 import org.apache.tinkerpop.gremlin.jsr223.GremlinScriptEngineManager;
 import org.apache.tinkerpop.gremlin.server.Settings;
@@ -24,14 +24,16 @@ import org.janusgraph.graphdb.database.StandardJanusGraph;
 import org.janusgraph.graphdb.management.ConfigurationManagementGraph;
 import org.janusgraph.graphdb.management.JanusGraphManager;
 import org.janusgraph.graphdb.management.utils.ConfigurationManagementGraphNotEnabledException;
+import org.janusgraph.util.system.ConfigurationUtil;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import java.util.Map;
+import java.util.Set;
 import javax.script.Bindings;
 import javax.script.SimpleBindings;
-import java.util.Map;
 
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.GRAPH_NAME;
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.STORAGE_BACKEND;
@@ -224,7 +226,7 @@ public abstract class AbstractConfiguredGraphFactoryTest {
 
             final Map<String, Object> map = graphConfig.getMap();
             map.put(STORAGE_BACKEND.toStringWithoutRoot(), "bogusBackend");
-            ConfiguredGraphFactory.updateConfiguration(graphName, new MapConfiguration(map));
+            ConfiguredGraphFactory.updateConfiguration(graphName, ConfigurationUtil.loadMapConfiguration(map));
             assertNull(gm.getGraph(graphName));
             // we should throw an error since the config has been updated and we are attempting
             // to open a bogus backend
@@ -357,6 +359,32 @@ public abstract class AbstractConfiguredGraphFactoryTest {
         } finally {
             ConfiguredGraphFactory.removeConfiguration(graphName);
             ConfiguredGraphFactory.close(graphName);
+        }
+    }
+
+    @Test
+    public void shouldGetGraphNames() throws Exception {
+        try {
+            ConfiguredGraphFactory.createTemplateConfiguration(getTemplateConfig());
+            final StandardJanusGraph graph1 = (StandardJanusGraph) ConfiguredGraphFactory.create("graph1");
+            final StandardJanusGraph graph2 = (StandardJanusGraph) ConfiguredGraphFactory.create("graph2");
+
+            assertNotNull(graph1);
+            assertNotNull(graph2);
+
+            Set<String> graphNames = ConfiguredGraphFactory.getGraphNames();
+
+            assertEquals(2, graphNames.size());
+            assertTrue(graphNames.contains("graph1"));
+            assertTrue(graphNames.contains("graph2"));
+
+            assertEquals("graph1", graph1.getConfiguration().getConfiguration().get(GRAPH_NAME));
+            assertEquals("graph2", graph2.getConfiguration().getConfiguration().get(GRAPH_NAME));
+        } finally {
+            ConfiguredGraphFactory.removeConfiguration("graph1");
+            ConfiguredGraphFactory.removeConfiguration("graph2");
+            ConfiguredGraphFactory.close("graph1");
+            ConfiguredGraphFactory.close("graph2");
         }
     }
 

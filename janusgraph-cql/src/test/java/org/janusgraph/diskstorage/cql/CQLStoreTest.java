@@ -31,6 +31,9 @@ import org.janusgraph.testutil.JanusGraphFeature;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -43,10 +46,25 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
-import static org.janusgraph.diskstorage.cql.CQLConfigOptions.*;
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.janusgraph.diskstorage.cql.CQLConfigOptions.CF_COMPRESSION;
+import static org.janusgraph.diskstorage.cql.CQLConfigOptions.CF_COMPRESSION_BLOCK_SIZE;
+import static org.janusgraph.diskstorage.cql.CQLConfigOptions.CF_COMPRESSION_TYPE;
+import static org.janusgraph.diskstorage.cql.CQLConfigOptions.GC_GRACE_SECONDS;
+import static org.janusgraph.diskstorage.cql.CQLConfigOptions.SPECULATIVE_RETRY;
+import static org.janusgraph.diskstorage.cql.CQLConfigOptions.USE_EXTERNAL_LOCKING;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @Testcontainers
@@ -160,6 +178,46 @@ public class CQLStoreTest extends KeyColumnValueStoreTest {
             opts.remove("enabled");
         }
         assertEquals(Collections.emptyMap(), opts);
+    }
+
+    @Test
+    public void testSetGcGraceSeconds() throws BackendException {
+        final String cf = TEST_CF_NAME + "_set_gc_grace_seconds";
+        final int oneDayInSeconds = 86400;
+
+        final ModifiableConfiguration config = getBaseStorageConfiguration();
+        config.set(GC_GRACE_SECONDS, oneDayInSeconds);
+
+        final CQLStoreManager cqlStoreManager = openStorageManager(config);
+        cqlStoreManager.openDatabase(cf);
+        assertEquals(oneDayInSeconds, cqlStoreManager.getGcGraceSeconds(cf));
+    }
+
+    @ParameterizedTest
+    @MethodSource("validSpeculativeRetryProvider")
+    public void testValidSpeculativeRetry(int idx, String input, String pattern) throws BackendException {
+        final String cf = TEST_CF_NAME + "_valid_speculative_retry_" + idx;
+
+        final ModifiableConfiguration config = getBaseStorageConfiguration();
+        config.set(SPECULATIVE_RETRY, input);
+
+        final CQLStoreManager cqlStoreManager = openStorageManager(config);
+        cqlStoreManager.openDatabase(cf);
+
+        assertTrue(Pattern.matches(pattern, cqlStoreManager.getSpeculativeRetry(cf)));
+    }
+
+    public static Stream<Arguments> validSpeculativeRetryProvider() {
+        return Stream.of(
+            arguments(0, "NONE", "NONE"),
+            arguments(1, "ALWAYS", "ALWAYS"),
+            arguments(2, "95percentile", "95(?:\\.0+)?PERCENTILE"),
+            arguments(3, "99PERCENTILE", "99(?:\\.0+)?PERCENTILE"),
+            arguments(4, "99.9PERCENTILE", "99\\.90*PERCENTILE"),
+            arguments(5, "100ms", "100(?:\\.0+)?ms"),
+            arguments(6, "100MS", "100(?:\\.0+)?ms"),
+            arguments(7, "100.9ms", "100\\.90*ms")
+        );
     }
 
     @Test

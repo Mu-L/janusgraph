@@ -14,6 +14,7 @@
 
 package org.janusgraph.pkgtest;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Test;
 public class JanusGraphScriptIT extends JanusGraphAssemblyBaseIT {
 
     @Test
+    @Tag(TestCategory.FULL_TESTS)
     public void testGraphOfTheGodsGraphSONFull() throws Exception {
         unzipAndRunExpect("janusgraph-sh.expect.vm", true);
     }

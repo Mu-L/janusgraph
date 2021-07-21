@@ -16,7 +16,17 @@ package org.janusgraph.hadoop.formats.util;
 
 import com.carrotsearch.hppc.cursors.LongObjectCursor;
 import com.google.common.base.Preconditions;
-import org.janusgraph.core.*;
+import org.apache.tinkerpop.gremlin.structure.Direction;
+import org.apache.tinkerpop.gremlin.structure.Element;
+import org.apache.tinkerpop.gremlin.structure.T;
+import org.apache.tinkerpop.gremlin.structure.Vertex;
+import org.apache.tinkerpop.gremlin.structure.VertexProperty;
+import org.apache.tinkerpop.gremlin.tinkergraph.structure.TinkerEdge;
+import org.apache.tinkerpop.gremlin.tinkergraph.structure.TinkerGraph;
+import org.apache.tinkerpop.gremlin.tinkergraph.structure.TinkerVertex;
+import org.janusgraph.core.PropertyKey;
+import org.janusgraph.core.RelationType;
+import org.janusgraph.core.VertexLabel;
 import org.janusgraph.diskstorage.Entry;
 import org.janusgraph.diskstorage.StaticBuffer;
 import org.janusgraph.graphdb.database.RelationReader;
@@ -24,16 +34,9 @@ import org.janusgraph.graphdb.idmanagement.IDManager;
 import org.janusgraph.graphdb.internal.InternalRelationType;
 import org.janusgraph.graphdb.relations.RelationCache;
 import org.janusgraph.graphdb.types.TypeInspector;
-import org.janusgraph.hadoop.formats.util.input.SystemTypeInspector;
 import org.janusgraph.hadoop.formats.util.input.JanusGraphHadoopSetup;
-import org.apache.tinkerpop.gremlin.structure.T;
-import org.apache.tinkerpop.gremlin.structure.Direction;
-import org.apache.tinkerpop.gremlin.structure.Element;
-import org.apache.tinkerpop.gremlin.structure.Vertex;
-import org.apache.tinkerpop.gremlin.structure.VertexProperty;
-import org.apache.tinkerpop.gremlin.tinkergraph.structure.TinkerEdge;
-import org.apache.tinkerpop.gremlin.tinkergraph.structure.TinkerGraph;
-import org.apache.tinkerpop.gremlin.tinkergraph.structure.TinkerVertex;
+import org.janusgraph.hadoop.formats.util.input.SystemTypeInspector;
+import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,14 +60,13 @@ public class JanusGraphVertexDeserializer implements AutoCloseable {
         this.idManager = setup.getIDManager();
     }
 
+    private boolean edgeExists(Vertex vertex, RelationType type, RelationCache possibleDuplicate) {
+        Iterator<Edge> it = vertex.edges(possibleDuplicate.direction, type.name());
 
-    private static Boolean isLoopAdded(Vertex vertex, String label) {
-        Iterator<Vertex> adjacentVertices = vertex.vertices(Direction.BOTH, label);
+        while (it.hasNext()) {
+            Edge edge = it.next();
 
-        while (adjacentVertices.hasNext()) {
-            Vertex adjacentVertex = adjacentVertices.next();
-
-            if(adjacentVertex.equals(vertex)){
+            if (edge.id().equals(possibleDuplicate.relationId)) {
                 return true;
             }
         }
@@ -156,8 +158,8 @@ public class JanusGraphVertexDeserializer implements AutoCloseable {
                     // We don't know the label of the other vertex, but one must be provided
                     TinkerVertex adjacentVertex = getOrCreateVertex(relation.getOtherVertexId(), null, tg);
 
-                    // handle self-loop edges
-                    if (tv.equals(adjacentVertex) && isLoopAdded(tv, type.name())) {
+                    // skip self-loop edges that were already processed, but from a different direction
+                    if (tv.equals(adjacentVertex) && edgeExists(tv, type, relation)) {
                         continue;
                     }
 

@@ -14,6 +14,7 @@
 
 package org.janusgraph.graphdb.query.graph;
 
+import com.google.common.base.Preconditions;
 import org.janusgraph.diskstorage.indexing.IndexQuery;
 import org.janusgraph.graphdb.query.BackendQuery;
 import org.janusgraph.graphdb.query.BaseQuery;
@@ -22,8 +23,6 @@ import org.janusgraph.graphdb.query.profile.QueryProfiler;
 import org.janusgraph.graphdb.types.CompositeIndexType;
 import org.janusgraph.graphdb.types.IndexType;
 import org.janusgraph.graphdb.types.MixedIndexType;
-
-import com.google.common.base.Preconditions;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -116,6 +115,7 @@ public class JointIndexQuery extends BaseQuery implements BackendQuery<JointInde
             subqueries = new ArrayList<>(queries);
         }
         JointIndexQuery jointIndexQuery = new JointIndexQuery(subqueries);
+        jointIndexQuery.observeWith(this.profiler, false);
         jointIndexQuery.setLimit(newLimit);
         return jointIndexQuery;
     }
@@ -173,7 +173,7 @@ public class JointIndexQuery extends BaseQuery implements BackendQuery<JointInde
 
         @Override
         public String toString() {
-            return index.toString()+":"+query.toString();
+            return index +":"+ query;
         }
 
         @Override

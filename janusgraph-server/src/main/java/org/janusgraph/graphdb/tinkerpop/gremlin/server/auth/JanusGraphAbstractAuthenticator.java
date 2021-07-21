@@ -14,12 +14,7 @@
 
 package org.janusgraph.graphdb.tinkerpop.gremlin.server.auth;
 
-import static org.apache.tinkerpop.gremlin.groovy.jsr223.dsl.credential.CredentialGraphTokens.PROPERTY_USERNAME;
-import static org.apache.tinkerpop.gremlin.server.auth.SimpleAuthenticator.CONFIG_CREDENTIALS_DB;
-
-import java.net.InetAddress;
-import java.util.Map;
-
+import com.google.common.base.Preconditions;
 import org.apache.tinkerpop.gremlin.groovy.jsr223.dsl.credential.CredentialTraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.server.auth.Authenticator;
@@ -35,12 +30,16 @@ import org.janusgraph.graphdb.database.management.ManagementSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Preconditions;
+import java.net.InetAddress;
+import java.util.Map;
+
+import static org.apache.tinkerpop.gremlin.groovy.jsr223.dsl.credential.CredentialGraphTokens.PROPERTY_USERNAME;
+import static org.apache.tinkerpop.gremlin.server.auth.SimpleAuthenticator.CONFIG_CREDENTIALS_DB;
 
 /**
  * An abstract class to handle the initial setup of indexes for authentication.
  */
-abstract public class JanusGraphAbstractAuthenticator implements Authenticator {
+public abstract class JanusGraphAbstractAuthenticator implements Authenticator {
 
     private static final Logger logger = LoggerFactory.getLogger(JanusGraphAbstractAuthenticator.class);
 
@@ -67,7 +66,7 @@ abstract public class JanusGraphAbstractAuthenticator implements Authenticator {
     }
 
     @Override
-    abstract public SaslNegotiator newSaslNegotiator(final InetAddress remoteAddress);
+    public abstract SaslNegotiator newSaslNegotiator(final InetAddress remoteAddress);
 
     public CredentialTraversalSource createCredentials(JanusGraph graph) {
         return graph.traversal(CredentialTraversalSource.class);

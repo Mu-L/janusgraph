@@ -18,6 +18,7 @@ import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.cql.AsyncResultSet;
 import com.datastax.oss.driver.api.core.cql.BatchableStatement;
 import com.datastax.oss.driver.api.core.cql.BoundStatement;
+import com.datastax.oss.driver.api.core.cql.BoundStatementBuilder;
 import com.datastax.oss.driver.api.core.cql.ExecutionInfo;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
@@ -25,9 +26,12 @@ import com.datastax.oss.driver.api.core.cql.Row;
 import com.datastax.oss.driver.api.core.metadata.TokenMap;
 import com.datastax.oss.driver.api.core.servererrors.QueryValidationException;
 import com.datastax.oss.driver.api.core.type.DataTypes;
+import com.datastax.oss.driver.api.querybuilder.delete.DeleteSelection;
+import com.datastax.oss.driver.api.querybuilder.insert.Insert;
 import com.datastax.oss.driver.api.querybuilder.relation.Relation;
 import com.datastax.oss.driver.api.querybuilder.schema.CreateTableWithOptions;
 import com.datastax.oss.driver.api.querybuilder.schema.compaction.CompactionStrategy;
+import com.datastax.oss.driver.api.querybuilder.select.Select;
 import com.datastax.oss.driver.internal.core.cql.ResultSets;
 import com.datastax.oss.driver.shaded.guava.common.collect.ImmutableMap;
 import io.vavr.Tuple;
@@ -83,7 +87,11 @@ import static org.janusgraph.diskstorage.cql.CQLConfigOptions.CF_COMPRESSION_BLO
 import static org.janusgraph.diskstorage.cql.CQLConfigOptions.CF_COMPRESSION_TYPE;
 import static org.janusgraph.diskstorage.cql.CQLConfigOptions.COMPACTION_OPTIONS;
 import static org.janusgraph.diskstorage.cql.CQLConfigOptions.COMPACTION_STRATEGY;
+import static org.janusgraph.diskstorage.cql.CQLConfigOptions.GC_GRACE_SECONDS;
+import static org.janusgraph.diskstorage.cql.CQLConfigOptions.SPECULATIVE_RETRY;
 import static org.janusgraph.diskstorage.cql.CQLTransaction.getTransaction;
+import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.STORE_META_TIMESTAMPS;
+import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.STORE_META_TTL;
 
 /**
  * An implementation of {@link KeyColumnValueStore} which stores the data in a CQL connected backend.
@@ -149,63 +157,105 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
         }
 
         // @formatter:off
-        this.getSlice = this.session.prepare(selectFrom(this.storeManager.getKeyspaceName(), this.tableName)
-                .column(COLUMN_COLUMN_NAME)
-                .column(VALUE_COLUMN_NAME)
-                .function(WRITETIME_FUNCTION_NAME, column(VALUE_COLUMN_NAME)).as(WRITETIME_COLUMN_NAME)
-                .function(TTL_FUNCTION_NAME, column(VALUE_COLUMN_NAME)).as(TTL_COLUMN_NAME)
-                .where(
-                    Relation.column(KEY_COLUMN_NAME).isEqualTo(bindMarker(KEY_BINDING)),
-                    Relation.column(COLUMN_COLUMN_NAME).isGreaterThanOrEqualTo(bindMarker(SLICE_START_BINDING)),
-                    Relation.column(COLUMN_COLUMN_NAME).isLessThan(bindMarker(SLICE_END_BINDING))
-                )
-                .limit(bindMarker(LIMIT_BINDING)).build());
+        final Select getSliceSelect = selectFrom(this.storeManager.getKeyspaceName(), this.tableName)
+            .column(COLUMN_COLUMN_NAME)
+            .column(VALUE_COLUMN_NAME)
+            .where(
+                Relation.column(KEY_COLUMN_NAME).isEqualTo(bindMarker(KEY_BINDING)),
+                Relation.column(COLUMN_COLUMN_NAME).isGreaterThanOrEqualTo(bindMarker(SLICE_START_BINDING)),
+                Relation.column(COLUMN_COLUMN_NAME).isLessThan(bindMarker(SLICE_END_BINDING))
+            )
+            .limit(bindMarker(LIMIT_BINDING));
+        this.getSlice = this.session.prepare(addTTLFunction(addTimestampFunction(getSliceSelect)).build());
 
-        this.getKeysRanged = this.session.prepare(selectFrom(this.storeManager.getKeyspaceName(), this.tableName)
+        if (this.storeManager.getFeatures().hasOrderedScan()) {
+            final Select getKeysRangedSelect = selectFrom(this.storeManager.getKeyspaceName(), this.tableName)
                 .column(KEY_COLUMN_NAME)
                 .column(COLUMN_COLUMN_NAME)
                 .column(VALUE_COLUMN_NAME)
-                .function(WRITETIME_FUNCTION_NAME, column(VALUE_COLUMN_NAME)).as(WRITETIME_COLUMN_NAME)
-                .function(TTL_FUNCTION_NAME, column(VALUE_COLUMN_NAME)).as(TTL_COLUMN_NAME)
                 .allowFiltering()
                 .where(
                     Relation.token(KEY_COLUMN_NAME).isGreaterThanOrEqualTo(bindMarker(KEY_START_BINDING)),
                     Relation.token(KEY_COLUMN_NAME).isLessThan(bindMarker(KEY_END_BINDING))
                 )
                 .whereColumn(COLUMN_COLUMN_NAME).isGreaterThanOrEqualTo(bindMarker(SLICE_START_BINDING))
-                .whereColumn(COLUMN_COLUMN_NAME).isLessThanOrEqualTo(bindMarker(SLICE_END_BINDING))
-                .build());
+                .whereColumn(COLUMN_COLUMN_NAME).isLessThanOrEqualTo(bindMarker(SLICE_END_BINDING));
+            this.getKeysRanged = this.session.prepare(addTTLFunction(addTimestampFunction(getKeysRangedSelect)).build());
+        } else {
+            this.getKeysRanged = null;
+        }
 
-        this.getKeysAll = this.session.prepare(selectFrom(this.storeManager.getKeyspaceName(), this.tableName)
+        if (this.storeManager.getFeatures().hasUnorderedScan()) {
+            final Select getKeysAllSelect = selectFrom(this.storeManager.getKeyspaceName(), this.tableName)
                 .column(KEY_COLUMN_NAME)
                 .column(COLUMN_COLUMN_NAME)
                 .column(VALUE_COLUMN_NAME)
-                .function(WRITETIME_FUNCTION_NAME, column(VALUE_COLUMN_NAME)).as(WRITETIME_COLUMN_NAME)
-                .function(TTL_FUNCTION_NAME, column(VALUE_COLUMN_NAME)).as(TTL_COLUMN_NAME)
                 .allowFiltering()
                 .whereColumn(COLUMN_COLUMN_NAME).isGreaterThanOrEqualTo(bindMarker(SLICE_START_BINDING))
-                .whereColumn(COLUMN_COLUMN_NAME).isLessThanOrEqualTo(bindMarker(SLICE_END_BINDING))
-                .build());
+                .whereColumn(COLUMN_COLUMN_NAME).isLessThanOrEqualTo(bindMarker(SLICE_END_BINDING));
+            this.getKeysAll = this.session.prepare(addTTLFunction(addTimestampFunction(getKeysAllSelect)).build());
+        } else {
+            this.getKeysAll = null;
+        }
 
-        this.deleteColumn = this.session.prepare(deleteFrom(this.storeManager.getKeyspaceName(), this.tableName)
-                .usingTimestamp(bindMarker(TIMESTAMP_BINDING))
+        final DeleteSelection deleteSelection = addUsingTimestamp(deleteFrom(this.storeManager.getKeyspaceName(), this.tableName));
+        this.deleteColumn = this.session.prepare(deleteSelection
                 .whereColumn(KEY_COLUMN_NAME).isEqualTo(bindMarker(KEY_BINDING))
                 .whereColumn(COLUMN_COLUMN_NAME).isEqualTo(bindMarker(COLUMN_BINDING))
                 .build());
 
-        this.insertColumn = this.session.prepare(insertInto(this.storeManager.getKeyspaceName(), this.tableName)
+        final Insert insertColumnInsert = addUsingTimestamp(insertInto(this.storeManager.getKeyspaceName(), this.tableName)
                 .value(KEY_COLUMN_NAME, bindMarker(KEY_BINDING))
                 .value(COLUMN_COLUMN_NAME, bindMarker(COLUMN_BINDING))
-                .value(VALUE_COLUMN_NAME, bindMarker(VALUE_BINDING))
-                .usingTimestamp(bindMarker(TIMESTAMP_BINDING)).build());
+                .value(VALUE_COLUMN_NAME, bindMarker(VALUE_BINDING)));
+        this.insertColumn = this.session.prepare(insertColumnInsert.build());
 
-        this.insertColumnWithTTL = this.session.prepare(insertInto(this.storeManager.getKeyspaceName(), this.tableName)
-                .value(KEY_COLUMN_NAME, bindMarker(KEY_BINDING))
-                .value(COLUMN_COLUMN_NAME, bindMarker(COLUMN_BINDING))
-                .value(VALUE_COLUMN_NAME, bindMarker(VALUE_BINDING))
-                .usingTimestamp(bindMarker(TIMESTAMP_BINDING))
-                .usingTtl(bindMarker(TTL_BINDING)).build());
+        if (storeManager.getFeatures().hasCellTTL()) {
+            this.insertColumnWithTTL = this.session.prepare(insertColumnInsert.usingTtl(bindMarker(TTL_BINDING)).build());
+        } else {
+            this.insertColumnWithTTL = null;
+        }
         // @formatter:on
+    }
+
+    private DeleteSelection addUsingTimestamp(DeleteSelection deleteSelection) {
+        if (storeManager.isAssignTimestamp()) {
+            return deleteSelection.usingTimestamp(bindMarker(TIMESTAMP_BINDING));
+        }
+        return deleteSelection;
+    }
+
+    private Insert addUsingTimestamp(Insert insert) {
+        if (storeManager.isAssignTimestamp()) {
+            return insert.usingTimestamp(bindMarker(TIMESTAMP_BINDING));
+        }
+        return insert;
+    }
+
+    /**
+     * Add WRITETIME function into the select query to retrieve the timestamp that the data was written to the database,
+     * if {@link STORE_META_TIMESTAMPS} is enabled.
+     * @param select original query
+     * @return new query
+     */
+    private Select addTimestampFunction(Select select) {
+        if (storeManager.getStorageConfig().get(STORE_META_TIMESTAMPS, this.tableName)) {
+            return select.function(WRITETIME_FUNCTION_NAME, column(VALUE_COLUMN_NAME)).as(WRITETIME_COLUMN_NAME);
+        }
+        return select;
+    }
+
+    /**
+     * Add TTL function into the select query to retrieve how much longer the data is going to live, if {@link STORE_META_TTL}
+     * is enabled.
+     * @param select original query
+     * @return new query
+     */
+    private Select addTTLFunction(Select select) {
+        if (storeManager.getStorageConfig().get(STORE_META_TTL, this.tableName)) {
+            return select.function(TTL_FUNCTION_NAME, column(VALUE_COLUMN_NAME)).as(TTL_COLUMN_NAME);
+        }
+        return select;
     }
 
     /**
@@ -228,6 +278,8 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
 
         createTable = compactionOptions(createTable, configuration);
         createTable = compressionOptions(createTable, configuration);
+        createTable = gcGraceSeconds(createTable, configuration);
+        createTable = speculativeRetryOptions(createTable, configuration);
 
         session.execute(createTable.build());
     }
@@ -247,8 +299,7 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
     }
 
     private static CreateTableWithOptions compactionOptions(final CreateTableWithOptions createTable,
-                                                          final Configuration configuration) {
-
+                                                            final Configuration configuration) {
         if (!configuration.has(COMPACTION_STRATEGY)) {
             return createTable;
         }
@@ -266,6 +317,22 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
         }
 
         return createTable.withCompaction(compactionStrategy);
+    }
+
+    private static CreateTableWithOptions gcGraceSeconds(final CreateTableWithOptions createTable,
+                                                         final Configuration configuration) {
+        if (!configuration.has(GC_GRACE_SECONDS)) {
+            return createTable;
+        }
+        return createTable.withGcGraceSeconds(configuration.get(GC_GRACE_SECONDS));
+    }
+
+    private static CreateTableWithOptions speculativeRetryOptions(final CreateTableWithOptions createTable,
+                                                                  final Configuration configuration) {
+        if (!configuration.has(SPECULATIVE_RETRY)) {
+            return createTable;
+        }
+        return createTable.withSpeculativeRetry(configuration.get(SPECULATIVE_RETRY));
     }
 
     @Override
@@ -303,7 +370,7 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
      * VAVR Future.await will throw InterruptedException wrapped in a FatalException. If the Thread was in Object.wait, the interrupted
      * flag will be cleared as a side effect and needs to be reset. This method checks that the underlying cause of the FatalException is
      * InterruptedException and resets the interrupted flag.
-     * 
+     *
      * @param result the future to wait on
      * @throws PermanentBackendException if the thread was interrupted while waiting for the future result
      */
@@ -350,36 +417,37 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
         }
     }
 
-    /*
-     * Used from CQLStoreManager
-     */
-    BatchableStatement<BoundStatement> deleteColumn(final StaticBuffer key, final StaticBuffer column, final long timestamp) {
-
-        return this.deleteColumn.boundStatementBuilder()
-            .setByteBuffer(KEY_BINDING, key.asByteBuffer())
-            .setByteBuffer(COLUMN_BINDING, column.asByteBuffer())
-            .setLong(TIMESTAMP_BINDING, timestamp).build();
+    BatchableStatement<BoundStatement> deleteColumn(final StaticBuffer key, final StaticBuffer column) {
+        return deleteColumn(key, column, null);
     }
 
-    /*
-     * Used from CQLStoreManager
-     */
-    BatchableStatement<BoundStatement> insertColumn(final StaticBuffer key, final Entry entry, final long timestamp) {
-
-        final Integer ttl = (Integer) entry.getMetaData().get(EntryMetaData.TTL);
-        if (ttl != null) {
-            return this.insertColumnWithTTL.boundStatementBuilder()
-                .setByteBuffer(KEY_BINDING, key.asByteBuffer())
-                .setByteBuffer(COLUMN_BINDING, entry.getColumn().asByteBuffer())
-                .setByteBuffer(VALUE_BINDING, entry.getValue().asByteBuffer())
-                .setLong(TIMESTAMP_BINDING, timestamp)
-                .setInt(TTL_BINDING, ttl).build();
-        }
-        return this.insertColumn.boundStatementBuilder()
+    BatchableStatement<BoundStatement> deleteColumn(final StaticBuffer key, final StaticBuffer column, final Long timestamp) {
+        BoundStatementBuilder builder = deleteColumn.boundStatementBuilder()
             .setByteBuffer(KEY_BINDING, key.asByteBuffer())
+            .setByteBuffer(COLUMN_BINDING, column.asByteBuffer());
+        if (timestamp != null) {
+            builder = builder.setLong(TIMESTAMP_BINDING, timestamp);
+        }
+        return builder.build();
+    }
+
+    BatchableStatement<BoundStatement> insertColumn(final StaticBuffer key, final Entry entry) {
+        return insertColumn(key, entry, null);
+    }
+
+    BatchableStatement<BoundStatement> insertColumn(final StaticBuffer key, final Entry entry, final Long timestamp) {
+        final Integer ttl = (Integer) entry.getMetaData().get(EntryMetaData.TTL);
+        BoundStatementBuilder builder = ttl != null ? insertColumnWithTTL.boundStatementBuilder() : insertColumn.boundStatementBuilder();
+        builder = builder.setByteBuffer(KEY_BINDING, key.asByteBuffer())
             .setByteBuffer(COLUMN_BINDING, entry.getColumn().asByteBuffer())
-            .setByteBuffer(VALUE_BINDING, entry.getValue().asByteBuffer())
-            .setLong(TIMESTAMP_BINDING, timestamp).build();
+            .setByteBuffer(VALUE_BINDING, entry.getValue().asByteBuffer());
+        if (ttl != null) {
+            builder = builder.setInt(TTL_BINDING, ttl);
+        }
+        if (timestamp != null) {
+            builder = builder.setLong(TIMESTAMP_BINDING, timestamp);
+        }
+        return builder.build();
     }
 
     @Override
@@ -418,7 +486,7 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
 
     @Override
     public KeyIterator getKeys(final SliceQuery query, final StoreTransaction txh) throws BackendException {
-        if (this.storeManager.getFeatures().hasOrderedScan()) {
+        if (!this.storeManager.getFeatures().hasUnorderedScan()) {
             throw new PermanentBackendException("This operation is only allowed when a random partitioner (md5 or murmur3) is used.");
         }
 

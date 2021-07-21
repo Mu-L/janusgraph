@@ -27,7 +27,7 @@ All currently supported verions of JanusGraph are listed below.
 | JanusGraph | Storage Version | Cassandra | HBase | Bigtable | Elasticsearch | Solr | TinkerPop | Spark | Scala |
 | ----- | ---- | ---- | ---- | ---- | ---- | ---- | --- | ---- | ---- |
 | 0.5.z | 2 | 2.1.z, 2.2.z, 3.0.z, 3.11.z | 1.2.z, 1.3.z, 1.4.z, 2.1.z | 1.3.0, 1.4.0, 1.5.z, 1.6.z, 1.7.z, 1.8.z, 1.9.z, 1.10.z, 1.11.z, 1.14.z | 6.y, 7.y | 7.y | 3.4.z | 2.2.z | 2.11.z | 
-| 0.6.z | 2 | 3.0.z, 3.11.z | 1.2.z, 1.3.z, 1.4.z, 2.1.z | 1.3.0, 1.4.0, 1.5.z, 1.6.z, 1.7.z, 1.8.z, 1.9.z, 1.10.z, 1.11.z, 1.14.z | 6.y, 7.y | 7.y, 8.y | 3.4.z | 2.2.z | 2.11.z | 
+| 0.6.z | 2 | 3.0.z, 3.11.z | 1.6.z, 2.2.z | 1.3.0, 1.4.0, 1.5.z, 1.6.z, 1.7.z, 1.8.z, 1.9.z, 1.10.z, 1.11.z, 1.14.z | 6.y, 7.y | 7.y, 8.y | 3.5.z | 2.2.z | 2.11.z | 
 
 #### End-of-Life
 The versions of JanusGraph listed below are outdated and will no longer receive bugfixes.
@@ -58,13 +58,13 @@ compile "org.janusgraph:janusgraph-core:0.6.0"
 **Tested Compatibility:**
 
 * Apache Cassandra 3.0.14, 3.11.10
-* Apache HBase 1.2.6, 1.3.1, 1.4.10, 1.6.0, 2.1.5
+* Apache HBase 1.6.0, 2.2.7
 * Google Bigtable 1.3.0, 1.4.0, 1.5.0, 1.6.0, 1.7.0, 1.8.0, 1.9.0, 1.10.0, 1.11.0, 1.14.0
 * Oracle BerkeleyJE 7.5.11
-* Elasticsearch 6.0.1, 6.6.0, 7.11.1
-* Apache Lucene 8.6.0
-* Apache Solr 7.7.2, 8.5.2
-* Apache TinkerPop 3.4.10
+* Elasticsearch 6.0.1, 6.6.0, 7.13.2
+* Apache Lucene 8.9.0
+* Apache Solr 7.7.2, 8.9.0
+* Apache TinkerPop 3.5.0
 * Java 1.8
 
 #### Changes
@@ -82,6 +82,29 @@ For more information on features and bug fixes in 0.6.0, see the GitHub mileston
 
 #### Upgrade Instructions
 
+##### Experimental support for Amazon Keyspaces
+
+[Amazon Keyspaces](https://aws.amazon.com/keyspaces/) is a serverless managed Apache Cassandra-compatible
+database service provided by Amazon. See [Deploying on Amazon Keyspaces](https://docs.janusgraph.org/storage-backend/cassandra/#deploying-on-amazon-keyspaces-experimental)
+for more details.
+
+##### Breaking change for Configuration objects
+
+Prior to JanusGraph 0.6.0, `Configuration` objects were from the Apache `commons-configuration` library.
+To comply with the [TinkerPop change](http://tinkerpop.apache.org/docs/3.5.0-SNAPSHOT/upgrade/#_versions_and_dependencies),
+JanusGraph now uses the `commons-configuration2` library. A typical usage of configuration object is to
+create configuration using `ConfigurationGraphFactory`. Now you would need to use the new configuration2 library.
+Please refer to the
+[commons-configuration 2.0 migration guide](https://commons.apache.org/proper/commons-configuration/userguide/upgradeto2_0.html)
+for details. Note that this very likely does not affect gremlin console usage, since the new library
+is auto-imported, and the basic APIs remain the same. For java code usage, you need to import
+configuration2 library rather than the old configuration library.
+
+##### Breaking change for gremlin server configs
+
+`scriptEvaluationTimeout` is renamed to `evaluationTimeout`. You can refer to `conf/gremlin-server/gremlin-server.yaml`
+for example.
+
 ##### Breaking change for gremlin EventStrategy usage
 
 If you are using [EventStrategy](https://tinkerpop.apache.org/javadocs/current/full/org/apache/tinkerpop/gremlin/process/traversal/strategy/decoration/EventStrategy.html),
@@ -89,6 +112,37 @@ please note that now you need to register it every time you start a new transact
 An example is available at [ThreadLocalTxLeakTest::eventListenersCanBeReusedAcrossTx](https://github.com/JanusGraph/janusgraph/blob/master/janusgraph-test/src/test/java/org/janusgraph/core/ThreadLocalTxLeakTest.java)
 See more background of this breaking change in this
 [pull request](https://github.com/JanusGraph/janusgraph/pull/2472).
+
+##### Disable smart-limit by default and change HARD_MAX_LIMIT
+
+Prior to 0.6.0, `smart-limit` is enabled by default. It tries to guess a small limit
+for each graph centric query (e.g. `g.V().has("prop", "value")`) internally, and if more
+results are required by user, it queries backend again with a larger limit, and repeats
+until either results are exhausted or user stops the query. However, this is not the
+same as paging mechanism. All interim results will be fetched again in next round, making
+the whole query costly. Even worse, if your data backend does not return results in a consistent order,
+then some entries might be missing in the final results. Until JanusGraph can fully utilize
+the paging capacity provided by backends (e.g. Elasticsearch scroll), this option is
+recommended to be turned off. The exception is when you have a large number of results
+but you only need a few of them, then enabling `smart-limit` can reduce latency and memory
+usage. An example would be:
+
+```
+Iterator<Vertex> iter = graph.traversal().V().has("prop", "value");
+while (iter.hasNext()) {
+    Vertex v = iter.next();
+    if (canStop()) break;
+}
+```
+
+Prior to 0.6.0, even if `smart-limit` is disabled, JanusGraph adds a `HARD_MAX_LIMIT` that
+is equivalent to 100,000 to avoid fetching too many results at a time. This limit is now
+configurable, and by default, it's Integer.MAX_VALUE which can be interpreted as no limit.
+
+##### Add experimental support for Java 11
+
+We started to work on support for Java 11. We would like to get feedback,
+if everything is working as expected after upgrading to Java 11.
 
 ##### Removal of LoggingSchemaMaker
 
@@ -190,7 +244,7 @@ after a shiny new JanusGraph header.
 
 We are dropping Ganglia as we are using dropwizard for metrics. Dropwizard did drop Ganglia in the newest major version.
 
-##### DataStax cassandra driver upgrade from 3.9.0 to 4.10.0
+##### DataStax cassandra driver upgrade from 3.9.0 to 4.12.0
 
 All DataStax cassandra driver metrics are now disabled by default. To enable DataStax driver metrics you need to provide 
 a list of Session level metrics and / or Node level metrics you want to enable. To provide a list of enabled metrics, 
@@ -209,7 +263,7 @@ storage.cql.metrics.node-enabled=pool.open-connections,pool.available-streams,by
 ```
 
 See `advanced.metrics.session.enabled` and `advanced.metrics.node.enabled` sections in 
-[DataStax Metrics Configuration](https://docs.datastax.com/en/developer/java-driver/4.9/manual/core/configuration/reference/) 
+[DataStax Metrics Configuration](https://docs.datastax.com/en/developer/java-driver/4.12/manual/core/configuration/reference/) 
 for a complete list of available Session level and Node level metrics.
 
 Due to driver upgrade the next cql configuration options have been removed:
@@ -228,6 +282,49 @@ New cql configuration options should be used for upgrade:
 `storage.cql.local-datacenter` is mandatory now and defaults to `datacenter1`.
 
 See more new cql configuration options in configuration references under `storage.cql` section.
+
+##### Automatic configurations of dynamic graph binding
+
+If the JanusGraphManager is configured, dynamic graph binding will be setup automatically, 
+see [Dynamic Graphs](operations/dynamic-graphs.md).
+
+!!! note 
+    Breaking changes in the config of the `gremlin-server.yaml`.
+
+Following, classes are removed and have to be replaced by tinkerpop equivalent:
+
+| removed class | replacement class|
+| --- | --- |
+| `org.janusgraph.channelizers.JanusGraphWebSocketChannelizer` | `org.apache.tinkerpop.gremlin.server.channel.WebSocketChannelizer` |
+| `org.janusgraph.channelizers.JanusGraphHttpChannelizer` | `org.apache.tinkerpop.gremlin.server.channel.HttpChannelizer` |
+| `org.janusgraph.channelizers.JanusGraphNioChannelizer` | `org.apache.tinkerpop.gremlin.server.channel.NioChannelizer` |
+| `org.janusgraph.channelizers.JanusGraphWsAndHttpChannelizer` | `org.apache.tinkerpop.gremlin.server.channel.WsAndHttpChannelizer` |
+
+##### Breaking change Lucene and Solr fuzzy predicates
+
+The text predicates `text.textFuzzy` and `text.textContainsFuzzy` have been updated in both the Lucene and Solr indexing
+backends to align with JanusGraph and Elastic. These predicates now inspect the query length to determine the Levenshtein
+distance, where previously they used the backend's default max distance of 2:
+
+- 0 for strings of one or two characters (exact match)
+- 1 for strings of three, four or five characters
+- 2 for strings of more than five characters
+
+**Change Matrix:**
+
+| text | query | previous result | new result |
+| --- | --- | --- | --- |
+| ah | ah | true | true |
+| ah | ai | true | **false** |
+| hop | hop | true | true |
+| hop | hap | true | true |
+| hop | hoop | true | true |
+| hop | hooop | true | **false** |
+| surprises | surprises | true | true |
+| surprises | surprizes | true | true |
+| surprises | surpprises | true | true |
+| surprises | surpprisess | false | false |
+
 
 ### Version 0.5.3 (Release Date: December 24, 2020)
 

@@ -16,6 +16,10 @@ package org.janusgraph.graphdb.database.serialize.attribute;
 
 import org.apache.tinkerpop.shaded.jackson.databind.util.StdDateFormat;
 import org.janusgraph.graphdb.database.serialize.StandardSerializer;
+import org.junit.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.ArrayList;
 import java.util.Date;
@@ -24,11 +28,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.stream.Stream;
-
-import org.junit.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -42,6 +41,15 @@ public class DateSerializerTest {
             Arguments.of(new Date(1557532800000L), "2019-05-11"),
             Arguments.of(new Date(1557602288000L), "2019-05-11T19:18:08+00:00"),
             Arguments.of(new Date(1557602288000L), "2019-05-11T19:18:08Z"),
+            Arguments.of(new Date(1557602288000L), "2019-05-11T19:18:08"),
+            Arguments.of(new Date(1557598680000L), "2019-05-11T19:18+01:00"),
+            Arguments.of(new Date(1557602280000L), "2019-05-11T19:18Z"),
+            Arguments.of(new Date(1557602280000L), "2019-05-11T19:18"),
+            Arguments.of(new Date(1557602288200L), "2019-05-11T19:18:08.2"),
+            Arguments.of(new Date(1557566288400L), "2019-05-11T19:18:08.400+10"),
+            Arguments.of(new Date(1557613088010L), "2019-05-11T19:18:08.01-0300"),
+            Arguments.of(new Date(1557602280000L), "2019-05-11T19:18Z"),
+            Arguments.of(new Date(1557602280000L), "2019-05-11T19:18"),
             Arguments.of(new Date(786297600000L), "Thu, 01 Dec 1994 16:00:00 GMT"),
             Arguments.of(new Date(784111777000L), "Sun, 06 Nov 1994 08:49:37 GMT")
         );

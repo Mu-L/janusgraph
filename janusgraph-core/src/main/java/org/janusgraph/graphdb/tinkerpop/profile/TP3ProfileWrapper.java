@@ -15,9 +15,9 @@
 package org.janusgraph.graphdb.tinkerpop.profile;
 
 import com.google.common.base.Preconditions;
-import org.janusgraph.graphdb.query.profile.QueryProfiler;
 import org.apache.tinkerpop.gremlin.process.traversal.util.MutableMetrics;
 import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalMetrics;
+import org.janusgraph.graphdb.query.profile.QueryProfiler;
 
 /**
  * @author Matthias Broecheler (me@matthiasb.com)
@@ -40,6 +40,10 @@ public class TP3ProfileWrapper implements QueryProfiler {
         MutableMetrics nested = new MutableMetrics(metrics.getId()+"."+groupName+"_"+nextId,groupName);
         metrics.addNested(nested);
         return new TP3ProfileWrapper(nested);
+    }
+
+    public MutableMetrics getMetrics() {
+        return metrics;
     }
 
     @Override

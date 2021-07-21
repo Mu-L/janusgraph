@@ -21,6 +21,16 @@ import io.grpc.inprocess.InProcessServerBuilder;
 import org.apache.tinkerpop.gremlin.server.GraphManager;
 import org.apache.tinkerpop.gremlin.server.Settings;
 import org.apache.tinkerpop.gremlin.server.util.DefaultGraphManager;
+import org.janusgraph.core.JanusGraph;
+import org.janusgraph.core.VertexLabel;
+import org.janusgraph.core.schema.EdgeLabelMaker;
+import org.janusgraph.core.schema.JanusGraphManagement;
+import org.janusgraph.core.schema.VertexLabelMaker;
+import org.janusgraph.graphdb.grpc.schema.SchemaManagerImpl;
+import org.janusgraph.graphdb.grpc.schema.util.GrpcUtils;
+import org.janusgraph.graphdb.grpc.types.EdgeLabel;
+import org.janusgraph.graphdb.grpc.types.EdgeLabelOrBuilder;
+import org.janusgraph.graphdb.grpc.types.VertexLabelOrBuilder;
 import org.janusgraph.graphdb.server.TestingServerClosable;
 import org.javatuples.Pair;
 import org.junit.jupiter.api.AfterEach;
@@ -31,12 +41,12 @@ import java.util.HashMap;
 
 public abstract class JanusGraphGrpcServerBaseTest {
 
+    protected JanusGraphContextHandler contextHandler;
     protected GraphManager graphManager;
     protected ManagedChannel managedChannel;
     private TestingServerClosable closable;
-    protected JanusGraphManagerServiceGrpc.JanusGraphManagerServiceBlockingStub blockingStub;
 
-    protected GraphManager getGraphManager() {
+    protected static GraphManager getGraphManager() {
         Settings settings = new Settings();
         HashMap<String, String> map = new HashMap<>();
         map.put("graph", "src/test/resources/janusgraph-inmemory.properties");
@@ -46,21 +56,54 @@ public abstract class JanusGraphGrpcServerBaseTest {
         return new DefaultGraphManager(settings);
     }
 
-    private Pair<Server, String> createServer(GraphManager graphManager) throws IOException {
+    public long createVertexLabel(String graph, VertexLabelOrBuilder vertexLabel) {
+        JanusGraphManagement management = ((JanusGraph) graphManager.getGraph(graph)).openManagement();
+        VertexLabelMaker vertexLabelMaker = management.makeVertexLabel(vertexLabel.getName());
+        if (vertexLabel.getReadOnly()) {
+            vertexLabelMaker.setStatic();
+        }
+        if (vertexLabel.getPartitioned()) {
+            vertexLabelMaker.partition();
+        }
+        VertexLabel createdVertexLabel = vertexLabelMaker.make();
+
+        management.commit();
+        return createdVertexLabel.longId();
+    }
+
+    public long createEdgeLabel(String graph, EdgeLabelOrBuilder edgeLabel) {
+        JanusGraphManagement management = ((JanusGraph) graphManager.getGraph(graph)).openManagement();
+        EdgeLabelMaker edgeLabelMaker = management.makeEdgeLabel(edgeLabel.getName());
+        if (edgeLabel.getDirection() == EdgeLabel.Direction.BOTH) {
+            edgeLabelMaker.directed();
+        } else {
+            edgeLabelMaker.unidirected();
+        }
+        edgeLabelMaker.multiplicity(GrpcUtils.convertGrpcEdgeMultiplicity(edgeLabel.getMultiplicity()));
+        org.janusgraph.core.EdgeLabel createdEdgeLabel = edgeLabelMaker.make();
+
+        management.commit();
+        return createdEdgeLabel.longId();
+    }
+
+    private static Pair<Server, String> createServer(JanusGraphContextHandler contextHandler) throws IOException {
         String serverName = InProcessServerBuilder.generateName();
         Server server = InProcessServerBuilder
-            .forName(serverName).directExecutor()
-            .addService(new JanusGraphManagerServiceImpl(graphManager)).build().start();
+            .forName(serverName)
+            .directExecutor()
+            .addService(new JanusGraphManagerServiceImpl(contextHandler))
+            .addService(new SchemaManagerImpl(contextHandler))
+            .build().start();
         return new Pair<>(server, serverName);
     }
 
     @BeforeEach
     public void startServer() throws IOException {
         graphManager = getGraphManager();
-        Pair<Server, String> server = createServer(graphManager);
+        contextHandler = new JanusGraphContextHandler(graphManager);
+        Pair<Server, String> server = createServer(contextHandler);
         managedChannel = InProcessChannelBuilder.forName(server.getValue1()).directExecutor().build();
         closable = new TestingServerClosable(server.getValue0(), managedChannel);
-        blockingStub = JanusGraphManagerServiceGrpc.newBlockingStub(managedChannel);
     }
 
     @AfterEach

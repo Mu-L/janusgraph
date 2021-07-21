@@ -14,19 +14,8 @@
 
 package org.janusgraph.diskstorage.es.rest;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
-
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import javax.net.ssl.SSLContext;
-
-import org.apache.commons.configuration.BaseConfiguration;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
@@ -49,6 +38,7 @@ import org.janusgraph.diskstorage.es.rest.util.HttpAuthTypes;
 import org.janusgraph.diskstorage.es.rest.util.RestClientAuthenticator;
 import org.janusgraph.diskstorage.es.rest.util.SSLConfigurationCallback;
 import org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration;
+import org.janusgraph.util.system.ConfigurationUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,8 +48,32 @@ import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableMap;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import javax.net.ssl.SSLContext;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyBoolean;
+import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.anyObject;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.same;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 public class RestClientSetupTest {
@@ -108,7 +122,7 @@ public class RestClientSetupTest {
     }
 
     private ElasticSearchClient baseConfigTest(Map<String, String> extraConfigValues) throws Exception {
-        final CommonsConfiguration cc = new CommonsConfiguration(new BaseConfiguration());
+        final CommonsConfiguration cc = new CommonsConfiguration(ConfigurationUtil.createBaseConfiguration());
         cc.set("index." + INDEX_NAME + ".backend", "elasticsearch");
         cc.set("index." + INDEX_NAME + ".elasticsearch.interface", "REST_CLIENT");
         for(Map.Entry<String, String> me: extraConfigValues.entrySet()) {
@@ -611,10 +625,10 @@ public class RestClientSetupTest {
 
         private static final Map<String, TestCustomAuthenticator> instanceMap = new HashMap<>();
 
-        final private String[] args;
+        private final String[] args;
 
-        final private List<Builder> customizeRequestConfigHistory = new LinkedList<>();
-        final private List<HttpAsyncClientBuilder> customizeHttpClientHistory = new LinkedList<>();
+        private final List<Builder> customizeRequestConfigHistory = new LinkedList<>();
+        private final List<HttpAsyncClientBuilder> customizeHttpClientHistory = new LinkedList<>();
         private int numInitCalls = 0;
 
         public TestCustomAuthenticator(String[] args) {

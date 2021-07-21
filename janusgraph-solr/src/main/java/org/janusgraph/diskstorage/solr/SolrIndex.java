@@ -14,25 +14,10 @@
 
 package org.janusgraph.diskstorage.solr;
 
-import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.INDEX_MAX_RESULT_SET_SIZE;
-import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.INDEX_NS;
-
-import java.io.IOException;
-import java.io.StringReader;
-import java.io.UncheckedIOException;
-import java.lang.reflect.Constructor;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
-import java.time.Instant;
-import java.util.*;
-import java.util.AbstractMap.SimpleEntry;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
-
+import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
 import org.apache.commons.io.IOUtils;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpEntityEnclosingRequest;
 import org.apache.http.HttpRequestInterceptor;
@@ -106,8 +91,36 @@ import org.janusgraph.graphdb.types.ParameterType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
+import java.io.IOException;
+import java.io.StringReader;
+import java.io.UncheckedIOException;
+import java.lang.reflect.Constructor;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.util.AbstractMap.SimpleEntry;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.Spliterator;
+import java.util.Spliterators;
+import java.util.TimeZone;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
+
+import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.INDEX_MAX_RESULT_SET_SIZE;
+import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.INDEX_NS;
 
 /**
  * @author Jared Holmberg (jholmberg@bericotechnologies.com), Pavel Yaskevich (pavel@thinkaurelius.com)
@@ -157,7 +170,7 @@ public class SolrIndex implements IndexProvider {
      * TODO Rename ZOOKEEPER_URL and "zookeeper-url" to ZOOKEEPER_URLS and
      * "zookeeper-urls" in future major releases.
      */
-    public static final ConfigOption<String[]> ZOOKEEPER_URL = new ConfigOption<String[]>(SOLR_NS,"zookeeper-url",
+    public static final ConfigOption<String[]> ZOOKEEPER_URL = new ConfigOption<>(SOLR_NS, "zookeeper-url",
             "URL of the Zookeeper instance coordinating the SolrCloud cluster",
             ConfigOption.Type.MASKABLE, new String[] { "localhost:2181" });
 
@@ -207,7 +220,7 @@ public class SolrIndex implements IndexProvider {
 
     /** Security Configuration */
 
-    public static final ConfigOption<Boolean> KERBEROS_ENABLED = new ConfigOption<Boolean>(SOLR_NS,"kerberos-enabled",
+    public static final ConfigOption<Boolean> KERBEROS_ENABLED = new ConfigOption<>(SOLR_NS, "kerberos-enabled",
             "Whether SOLR instance is Kerberized or not.",
             ConfigOption.Type.MASKABLE, false);
 
@@ -689,6 +702,27 @@ public class SolrIndex implements IndexProvider {
     }
 
     @Override
+    public Long queryCount(IndexQuery query, KeyInformation.IndexRetriever information, BaseTransaction tx) throws BackendException {
+        try {
+            final String collection = query.getStore();
+            final String keyIdField = getKeyFieldId(collection);
+            final SolrQuery solrQuery = new SolrQuery("*:*");
+            solrQuery.set(CommonParams.FL, keyIdField);
+            final String queryFilter = buildQueryFilter(query.getCondition(), information.get(collection));
+            solrQuery.addFilterQuery(queryFilter);
+            final QueryResponse response = solrClient.query(collection, solrQuery);
+            logger.debug("Executed query [{}] in {} ms", query.toString(), response.getElapsedTime());
+            return response.getResults().getNumFound();
+        } catch (final IOException e) {
+            logger.error("Query did not complete : ", e);
+            throw new PermanentBackendException(e);
+        } catch (final SolrServerException e) {
+            logger.error("Unable to query Solr index.", e);
+            throw new PermanentBackendException(e);
+        }
+    }
+
+    @Override
     public Long totals(RawQuery query, KeyInformation.IndexRetriever information,
                        BaseTransaction tx) throws BackendException {
         try {
@@ -771,7 +805,7 @@ public class SolrIndex implements IndexProvider {
                         return ("-" + key + ":\"" + escapeValue(value) + "\"");
                     }
                 } else if (predicate == Text.FUZZY || predicate == Text.CONTAINS_FUZZY) {
-                    return (key + ":"+escapeValue(value)+"~");
+                    return (key + ":"+escapeValue(value)+"~"+Text.getMaxEditDistance(value.toString()));
                 } else if (predicate == Cmp.LESS_THAN) {
                     return (key + ":[* TO \"" + escapeValue(value) + "\"}");
                 } else if (predicate == Cmp.LESS_THAN_EQUAL) {
@@ -958,7 +992,7 @@ public class SolrIndex implements IndexProvider {
 
     @Override
     public void close() throws BackendException {
-        logger.trace("Shutting down connection to Solr", solrClient);
+        logger.trace("Shutting down connection to Solr {}", solrClient);
         try {
             solrClient.close();
         } catch (final IOException e) {

@@ -15,11 +15,16 @@
 package org.janusgraph.graphdb.query;
 
 import com.google.common.collect.Iterators;
-import org.apache.tinkerpop.gremlin.process.traversal.util.Metrics;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
+import org.apache.tinkerpop.gremlin.process.traversal.util.Metrics;
 import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalMetrics;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
-import org.janusgraph.core.*;
+import org.janusgraph.core.Cardinality;
+import org.janusgraph.core.JanusGraph;
+import org.janusgraph.core.JanusGraphFactory;
+import org.janusgraph.core.JanusGraphTransaction;
+import org.janusgraph.core.JanusGraphVertex;
+import org.janusgraph.core.PropertyKey;
 import org.janusgraph.core.attribute.Contain;
 import org.janusgraph.core.attribute.Text;
 import org.janusgraph.core.schema.JanusGraphIndex;
@@ -41,7 +46,10 @@ import java.util.List;
 import static org.janusgraph.testutil.JanusGraphAssert.assertBackendHit;
 import static org.janusgraph.testutil.JanusGraphAssert.assertCount;
 import static org.janusgraph.testutil.JanusGraphAssert.assertNoBackendHit;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * @author Matthias Broecheler (me@matthiasb.com)
@@ -86,7 +94,7 @@ public class QueryTest {
 
         for (int i = 0; i < 20; i++) {
             tx.addVertex().property("prop1", "prop1val").element().property("prop2", "prop2val")
-                .element().property("prop3", "prop3val" + i % 2).element().property("prop4", "prop4val" + i % 2);
+                .element().property("prop3", "prop3val").element().property("prop4", "prop4val");
         }
         tx.commit();
 
@@ -101,13 +109,13 @@ public class QueryTest {
             .profile().next()));
 
         // Two conditions, one of which met by index prop1_idx. Multiply original limit by two for sake of in-memory filtering.
-        assertCount(5, graph.traversal().V().has("prop1", "prop1val").has("prop3", "prop3val0").limit(5));
-        assertEquals("multiKSQ[1]@10", getQueryAnnotation(graph.traversal().V().has("prop1", "prop1val").has("prop3", "prop3val0").limit(5)
+        assertCount(5, graph.traversal().V().has("prop1", "prop1val").has("prop3", "prop3val").limit(5));
+        assertEquals("multiKSQ[1]@10", getQueryAnnotation(graph.traversal().V().has("prop1", "prop1val").has("prop3", "prop3val").limit(5)
             .profile().next()));
 
         // Three conditions, one of which met by index prop1_idx. Multiply original limit by four for sake of in-memory filtering.
-        assertCount(5, graph.traversal().V().has("prop1", "prop1val").has("prop3", "prop3val0").has("prop4", "prop4val0").limit(5));
-        assertEquals("multiKSQ[1]@20", getQueryAnnotation(graph.traversal().V().has("prop1", "prop1val").has("prop3", "prop3val0").has("prop4", "prop4val0").limit(5)
+        assertCount(5, graph.traversal().V().has("prop1", "prop1val").has("prop3", "prop3val").has("prop4", "prop4val").limit(5));
+        assertEquals("multiKSQ[1]@20", getQueryAnnotation(graph.traversal().V().has("prop1", "prop1val").has("prop3", "prop3val").has("prop4", "prop4val").limit(5)
             .profile().next()));
     }
 
@@ -349,6 +357,70 @@ public class QueryTest {
         // Three characters different
         assertEquals(0, graph.traversal().V().has("name", Text.textFuzzy("some Val")).count().next());
         assertEquals(0, graph.traversal().V().has("name", Text.textContainsFuzzy("valuable")).count().next());
+    }
+
+    @Test
+    public void testTextContainsPhraseWithoutIndex() {
+        JanusGraphManagement mgmt = graph.openManagement();
+        PropertyKey name = mgmt.makePropertyKey("name").dataType(String.class).make();
+        mgmt.commit();
+
+        tx.addVertex().property("name", "some value");
+        tx.addVertex().property("name", "other value");
+        tx.commit();
+
+        assertEquals(2, graph.traversal().V().has("name", Text.textContainsPhrase("value")).count().next());
+        assertEquals(1, graph.traversal().V().has("name", Text.textContainsPhrase("other value")).count().next());
+        assertEquals(0, graph.traversal().V().has("name", Text.textContainsPhrase("final value")).count().next());
+    }
+
+    @Test
+    public void testTextNegatedWithoutIndex() {
+        JanusGraphManagement mgmt = graph.openManagement();
+        PropertyKey name = mgmt.makePropertyKey("name").dataType(String.class).make();
+        mgmt.commit();
+
+        tx.addVertex().property("name", "some value");
+        tx.addVertex().property("name", "other value");
+        tx.commit();
+
+        // Text.textNotFuzzy
+        assertEquals(1, graph.traversal().V().has("name", Text.textNotFuzzy("other values")).count().next());
+        assertEquals(2, graph.traversal().V().has("name", Text.textNotFuzzy("final values")).count().next());
+
+        // Text.textNotRegex
+        assertEquals(0, graph.traversal().V().has("name", Text.textNotRegex(".*value")).count().next());
+        assertEquals(1, graph.traversal().V().has("name", Text.textNotRegex("other.*")).count().next());
+        assertEquals(2, graph.traversal().V().has("name", Text.textNotRegex("final.*")).count().next());
+
+        // Text.textNotPrefix
+        assertEquals(1, graph.traversal().V().has("name", Text.textNotPrefix("other")).count().next());
+        assertEquals(2, graph.traversal().V().has("name", Text.textNotPrefix("final")).count().next());
+
+        // Text.textNotContains
+        assertEquals(0, graph.traversal().V().has("name", Text.textNotContains("value")).count().next());
+        assertEquals(1, graph.traversal().V().has("name", Text.textNotContains("other")).count().next());
+        assertEquals(2, graph.traversal().V().has("name", Text.textNotContains("final")).count().next());
+
+        // Text.textNotContainsFuzzy
+        assertEquals(0, graph.traversal().V().has("name", Text.textNotContainsFuzzy("values")).count().next());
+        assertEquals(1, graph.traversal().V().has("name", Text.textNotContainsFuzzy("others")).count().next());
+        assertEquals(2, graph.traversal().V().has("name", Text.textNotContainsFuzzy("final")).count().next());
+
+        // Text.textNotContainsRegex
+        assertEquals(0, graph.traversal().V().has("name", Text.textNotContainsRegex("val.*")).count().next());
+        assertEquals(1, graph.traversal().V().has("name", Text.textNotContainsRegex("oth.*")).count().next());
+        assertEquals(2, graph.traversal().V().has("name", Text.textNotContainsRegex("fin.*")).count().next());
+
+        // Text.textNotContainsPrefix
+        assertEquals(0, graph.traversal().V().has("name", Text.textNotContainsPrefix("val")).count().next());
+        assertEquals(1, graph.traversal().V().has("name", Text.textNotContainsPrefix("oth")).count().next());
+        assertEquals(2, graph.traversal().V().has("name", Text.textNotContainsPrefix("final")).count().next());
+
+        // Text.textNotContainsPhrase
+        assertEquals(0, graph.traversal().V().has("name", Text.textNotContainsPhrase("value")).count().next());
+        assertEquals(1, graph.traversal().V().has("name", Text.textNotContainsPhrase("other value")).count().next());
+        assertEquals(2, graph.traversal().V().has("name", Text.textNotContainsPhrase("final value")).count().next());
     }
 
 }

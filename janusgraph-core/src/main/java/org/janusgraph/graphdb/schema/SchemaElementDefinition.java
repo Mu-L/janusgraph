@@ -15,11 +15,14 @@
 package org.janusgraph.graphdb.schema;
 
 import com.google.common.base.Preconditions;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * @author Matthias Broecheler (me@matthiasb.com)
+ *
+ * @deprecated part of the management revamp in JG, see https://github.com/JanusGraph/janusgraph/projects/3.
  */
+@Deprecated
 public class SchemaElementDefinition {
 
     private final String name;

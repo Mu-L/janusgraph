@@ -14,6 +14,7 @@
 
 package org.janusgraph.diskstorage.keycolumnvalue;
 
+import com.google.common.base.Preconditions;
 import org.janusgraph.diskstorage.Entry;
 import org.janusgraph.diskstorage.EntryList;
 import org.janusgraph.diskstorage.StaticBuffer;
@@ -21,8 +22,6 @@ import org.janusgraph.diskstorage.util.BufferUtil;
 import org.janusgraph.diskstorage.util.EntryArrayList;
 import org.janusgraph.graphdb.query.BackendQuery;
 import org.janusgraph.graphdb.query.BaseQuery;
-
-import com.google.common.base.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -149,7 +148,8 @@ public class SliceQuery extends BaseQuery implements BackendQuery<SliceQuery> {
         if (type != null) {
             sb.append(type).append(":");
         }
-        sb.append("SliceQuery[").append(getSliceStart()).append(",").append(getSliceEnd()).append(")@").append(getLimit());
+        sb.append("SliceQuery[").append(getSliceStart()).append(",").append(getSliceEnd()).append(")");
+        if (hasLimit()) sb.append("@").append(getLimit());
         return sb.toString();
     }
 

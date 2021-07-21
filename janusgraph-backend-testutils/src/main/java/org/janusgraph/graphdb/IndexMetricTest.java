@@ -14,17 +14,6 @@
 
 package org.janusgraph.graphdb;
 
-import static org.janusgraph.diskstorage.Backend.METRICS_INDEX_PROVIDER_NAME;
-import static org.janusgraph.diskstorage.util.MetricInstrumentedIndexProvider.M_MUTATE;
-import static org.janusgraph.diskstorage.util.MetricInstrumentedIndexProvider.M_QUERY;
-import static org.janusgraph.diskstorage.util.MetricInstrumentedIndexProvider.M_RAW_QUERY;
-import static org.janusgraph.diskstorage.util.MetricInstrumentedIndexProvider.M_TOTALS;
-import static org.janusgraph.diskstorage.util.MetricInstrumentedIndexProvider.OPERATION_NAMES;
-import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.METRICS_PREFIX_DEFAULT;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
-import java.util.Map;
-
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableMap;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
@@ -36,6 +25,18 @@ import org.janusgraph.diskstorage.util.MetricInstrumentedStore;
 import org.janusgraph.util.stats.MetricManager;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
+
+import static org.janusgraph.diskstorage.Backend.METRICS_INDEX_PROVIDER_NAME;
+import static org.janusgraph.diskstorage.util.MetricInstrumentedIndexProvider.M_MIXED_COUNT_QUERY;
+import static org.janusgraph.diskstorage.util.MetricInstrumentedIndexProvider.M_MUTATE;
+import static org.janusgraph.diskstorage.util.MetricInstrumentedIndexProvider.M_QUERY;
+import static org.janusgraph.diskstorage.util.MetricInstrumentedIndexProvider.M_RAW_QUERY;
+import static org.janusgraph.diskstorage.util.MetricInstrumentedIndexProvider.M_TOTALS;
+import static org.janusgraph.diskstorage.util.MetricInstrumentedIndexProvider.OPERATION_NAMES;
+import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.METRICS_PREFIX_DEFAULT;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public abstract class IndexMetricTest extends JanusGraphBaseTest {
     public MetricManager metric;
@@ -60,14 +61,14 @@ public abstract class IndexMetricTest extends JanusGraphBaseTest {
         graph.tx().commit();
         graph.traversal().V().has("p1", "value").iterate();
         graph.traversal().V().has("p2", "value").iterate();
+        graph.traversal().V().has("p1", "value").count().next();
         graph.indexQuery("idx", "p1:*").vertexTotals();
         graph.indexQuery("idx", "p1:*").vertexStream();
 
-        Assertions.assertThrows(JanusGraphException.class,  () -> {
-            graph.indexQuery("idx", "!@#$%^").vertexTotals();
-        });
+        Assertions.assertThrows(JanusGraphException.class,  () ->
+            graph.indexQuery("idx", "!@#$%^").vertexTotals());
 
-        verifyIndexMetrics("search", METRICS_INDEX_PREFIX, ImmutableMap.of(M_MUTATE, 1L, M_QUERY, 1L, M_TOTALS, 2L, M_RAW_QUERY, 1L));
+        verifyIndexMetrics("search", METRICS_INDEX_PREFIX, ImmutableMap.of(M_MUTATE, 1L, M_QUERY, 1L, M_MIXED_COUNT_QUERY, 1L, M_TOTALS, 2L, M_RAW_QUERY, 1L));
         assertEquals(1, metric.getCounter(METRICS_INDEX_PREFIX, "search", M_TOTALS, MetricInstrumentedStore.M_EXCEPTIONS).getCount());
     }
 

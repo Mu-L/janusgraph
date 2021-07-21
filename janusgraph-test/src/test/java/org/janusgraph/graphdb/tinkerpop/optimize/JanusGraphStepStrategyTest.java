@@ -15,17 +15,19 @@
 package org.janusgraph.graphdb.tinkerpop.optimize;
 
 import org.apache.tinkerpop.gremlin.process.traversal.Order;
+import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategies;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.DefaultGraphTraversal;
+import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
+import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
-import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
-import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.IsStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.OrStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertiesStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.VertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ElementValueComparator;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer;
@@ -38,10 +40,6 @@ import org.apache.tinkerpop.gremlin.process.traversal.util.OrP;
 import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalHelper;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
-import org.apache.tinkerpop.gremlin.process.traversal.P;
-import org.apache.tinkerpop.gremlin.process.traversal.Step;
-import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
-import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.janusgraph.StorageSetup;
 import org.janusgraph.core.Cardinality;
 import org.janusgraph.core.JanusGraph;
@@ -51,14 +49,18 @@ import org.janusgraph.graphdb.predicate.ConnectiveJanusPredicate;
 import org.janusgraph.graphdb.query.JanusGraphPredicateUtils;
 import org.janusgraph.graphdb.tinkerpop.optimize.step.HasStepFolder;
 import org.janusgraph.graphdb.tinkerpop.optimize.step.JanusGraphMultiQueryStep;
+import org.janusgraph.graphdb.tinkerpop.optimize.step.JanusGraphPropertiesStep;
 import org.janusgraph.graphdb.tinkerpop.optimize.step.JanusGraphStep;
 import org.janusgraph.graphdb.tinkerpop.optimize.step.JanusGraphVertexStep;
 import org.janusgraph.graphdb.tinkerpop.optimize.strategy.JanusGraphLocalQueryOptimizerStrategy;
+import org.janusgraph.graphdb.tinkerpop.optimize.strategy.JanusGraphMultiQueryStrategy;
 import org.janusgraph.graphdb.tinkerpop.optimize.strategy.JanusGraphStepStrategy;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -71,15 +73,15 @@ import static org.apache.tinkerpop.gremlin.process.traversal.P.lt;
 import static org.apache.tinkerpop.gremlin.process.traversal.P.neq;
 import static org.apache.tinkerpop.gremlin.process.traversal.P.within;
 import static org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__.filter;
-import static org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__.properties;
 import static org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__.has;
 import static org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__.not;
+import static org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__.properties;
 import static org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__.values;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 public class JanusGraphStepStrategyTest {
-    
+
     @ParameterizedTest
     @MethodSource("generateTestParameters")
     public void doTest(Traversal original, Traversal optimized, Collection<TraversalStrategy> otherStrategies) {
@@ -113,41 +115,48 @@ public class JanusGraphStepStrategyTest {
         assertEquals(optimized.toString(), original.toString());
     }
 
+    @Test
+    public void shouldTriggerHasContainerSplit(){
+        final GraphTraversal.Admin<?, ?> traversal = new DefaultGraphTraversal<>();
+        final JanusGraphStep<Vertex, Vertex> graphStep = new JanusGraphStep<>(new GraphStep<>(traversal, Vertex.class, true));
+        graphStep.addHasContainer(new HasContainer("age", P.between("1", "123")));
+        assertEquals(2, graphStep.getHasContainers().size());
+    }
+
+    @Test
+    public void shouldTriggerLocalHasContainerSplit(){
+        final GraphTraversal.Admin<?, ?> traversal = new DefaultGraphTraversal<>();
+        final JanusGraphStep<Vertex, Vertex> graphStep = new JanusGraphStep<>(new GraphStep<>(traversal, Vertex.class, true));
+        List<HasContainer> localHasContainers = graphStep.addLocalHasContainersSplittingAndPContainers(
+            Arrays.asList(new HasContainer("age", P.between("1", "123")), new HasContainer("age2", P.between("123", "234"))));
+        assertEquals(4, localHasContainers.size());
+    }
+
+    @Test
+    public void shouldTriggerLocalHasContainerConvert(){
+        final GraphTraversal.Admin<?, ?> traversal = new DefaultGraphTraversal<>();
+        final JanusGraphStep<Vertex, Vertex> graphStep = new JanusGraphStep<>(new GraphStep<>(traversal, Vertex.class, true));
+        List<HasContainer> localHasContainers = graphStep.addLocalHasContainersConvertingAndPContainers(
+            Arrays.asList(new HasContainer("age", P.between("1", "123")), new HasContainer("age2", P.between("123", "234"))));
+        assertEquals(2, localHasContainers.size());
+    }
+
     private void applyMultiQueryTraversalSteps(Traversal.Admin<?,?> traversal) {
-        processVertexSteps(traversal);
-        processChildTraversals(traversal);
-        processIsMultiQuerySteps(traversal);
-    }
-
-    private void processVertexSteps(Traversal.Admin<?,?> traversal) {
-        TraversalHelper.getStepsOfClass(VertexStep.class, traversal).forEach(vertexStep -> {
+        TraversalHelper.getStepsOfAssignableClassRecursively(VertexStep.class, traversal).forEach(vertexStep -> {
             JanusGraphVertexStep janusGraphVertexStep = new JanusGraphVertexStep<>(vertexStep);
-            TraversalHelper.replaceStep(vertexStep, janusGraphVertexStep, traversal);
+            TraversalHelper.replaceStep(vertexStep, janusGraphVertexStep, vertexStep.getTraversal());
             if (JanusGraphTraversalUtil.isEdgeReturnStep(janusGraphVertexStep)) {
-                HasStepFolder.foldInHasContainer(janusGraphVertexStep, traversal, traversal);
+                HasStepFolder.foldInHasContainer(janusGraphVertexStep, vertexStep.getTraversal(), vertexStep.getTraversal());
             }
         });
-    }
-
-    private void processChildTraversals(Traversal.Admin<?,?> traversal) {
-        traversal.getSteps().forEach(step -> {
-            if (JanusGraphTraversalUtil.isMultiQueryCompatibleStep((Step<?, ?>) step)) {
-                ((TraversalParent)step).getGlobalChildren().forEach(child -> applyMultiQueryTraversalSteps(child));
-                ((TraversalParent)step).getLocalChildren().forEach(child -> applyMultiQueryTraversalSteps(child));
-            }
+        TraversalHelper.getStepsOfAssignableClassRecursively(PropertiesStep.class, traversal).forEach(vertexStep -> {
+            JanusGraphPropertiesStep janusGraphPropertiesStep = new JanusGraphPropertiesStep<>(vertexStep);
+            TraversalHelper.replaceStep(vertexStep, janusGraphPropertiesStep, vertexStep.getTraversal());
         });
-    }
-
-    /**
-     * Replace any place holders like 'is(MQ_OPTIONAL)' with the expected JanusGraphMultiQueryStep
-     * @param traversal The traversal to operate on
-     */
-    private void processIsMultiQuerySteps(Traversal.Admin<?,?> traversal) {
-        TraversalHelper.getStepsOfClass(IsStep.class, traversal).forEach(isStep -> {
+        TraversalHelper.getStepsOfAssignableClassRecursively(IsStep.class, traversal).forEach(isStep -> {
             Object expectedStep = isStep.getPredicate().getValue();
-            Step<Vertex, ?> nextStep = isStep.getNextStep();
-            if (expectedStep.equals(nextStep.getClass().getSimpleName())) {
-                TraversalHelper.replaceStep(isStep, new JanusGraphMultiQueryStep(nextStep), traversal);
+            if (expectedStep.equals(JanusGraphMultiQueryStep.class.getSimpleName())) {
+                TraversalHelper.replaceStep(isStep, new JanusGraphMultiQueryStep(isStep.getTraversal(), false), isStep.getTraversal());
             }
         });
     }
@@ -163,10 +172,10 @@ public class JanusGraphStepStrategyTest {
             } else if (hasKeyValues[i] instanceof HasStepFolder.OrderEntry) {
                 final HasStepFolder.OrderEntry orderEntry = (HasStepFolder.OrderEntry) hasKeyValues[i];
                 graphStep.orderBy(orderEntry.key, orderEntry.order);
-            } else if (hasKeyValues[i] instanceof DefaultGraphTraversal &&  ((DefaultGraphTraversal) hasKeyValues[i]).getStartStep() instanceof OrStep){
+            } else if (hasKeyValues[i] instanceof DefaultGraphTraversal && ((DefaultGraphTraversal) hasKeyValues[i]).getStartStep() instanceof OrStep){
                 for (final Traversal.Admin<?, ?> child : ((OrStep<?>) ((DefaultGraphTraversal) hasKeyValues[i]).getStartStep()).getLocalChildren()) {
                     final JanusGraphStep<Vertex, Vertex> localGraphStep = ((JanusGraphStep<Vertex, Vertex>) ((DefaultGraphTraversal) child).getStartStep());
-                    graphStep.addLocalAll(localGraphStep.getHasContainers());
+                    graphStep.addLocalHasContainersConvertingAndPContainers(localGraphStep.getHasContainers());
                     localGraphStep.getOrders().forEach(orderEntry -> graphStep.localOrderBy(localGraphStep.getHasContainers(), orderEntry.key, orderEntry.order));
                     graphStep.setLocalLimit(localGraphStep.getHasContainers(), localGraphStep.getLowLimit(), localGraphStep.getHighLimit());
                 }
@@ -288,39 +297,45 @@ public class JanusGraphStepStrategyTest {
         mgmt.makeEdgeLabel("knows").make();
         mgmt.commit();
 
-        // String constants for expected types of JanusGraphMultiQueryStep
-        final String MQ_CHOOSE = "ChooseStep";
-        final String MQ_UNION = "UnionStep";
-        final String MQ_OPTIONAL = "OptionalStep";
-        final String MQ_FILTER = "TraversalFilterStep";
-        final String MQ_REPEAT = "RepeatEndStep";
+        // String constant for expected JanusGraphMultiQueryStep
+        final String MQ_STEP = JanusGraphMultiQueryStep.class.getSimpleName();
 
-        List<JanusGraphLocalQueryOptimizerStrategy> otherStrategies = Collections.singletonList(JanusGraphLocalQueryOptimizerStrategy.instance());
+        List<TraversalStrategy.ProviderOptimizationStrategy> otherStrategies = new ArrayList<>(2);
+        otherStrategies.add(JanusGraphLocalQueryOptimizerStrategy.instance());
+        otherStrategies.add(JanusGraphMultiQueryStrategy.instance());
 
         return Arrays.stream(new Arguments[]{
+            arguments(g.V().in("knows").out("knows"),
+                g_V().is(MQ_STEP).in("knows").is(MQ_STEP).out("knows"), otherStrategies),
+            arguments(g.V().in("knows").values("weight"),
+                g_V().is(MQ_STEP).in("knows").is(MQ_STEP).values("weight"), otherStrategies),
+            // Need two JanusGraphMultiQuerySteps, one for each sub query because caches are flushed when queried
             arguments(g.V().choose(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1)),
-                g_V().is(MQ_CHOOSE).choose(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1)), otherStrategies),
+                g_V().is(MQ_STEP).choose(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1)), otherStrategies),
             arguments(g.V().union(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1)),
-                g_V().is(MQ_UNION).union(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1)), otherStrategies),
+                g_V().is(MQ_STEP).union(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1)), otherStrategies),
             arguments(g.V().outE().optional(__.inE("knows").has("weight", 0)),
-                g_V().outE().is(MQ_OPTIONAL).optional(__.inE("knows").has("weight", 0)), otherStrategies),
+                g_V().is(MQ_STEP).outE().is(MQ_STEP).optional(__.inE("knows").has("weight", 0)), otherStrategies),
             arguments(g.V().outE().filter(__.inE("knows").has("weight", 0)),
-                g_V().outE().is(MQ_FILTER).filter(__.inE("knows").has("weight", 0)), otherStrategies),
-            // The JanusGraphMultiQueryStep for repeat goes before the RepeatEndStep allowing it to feed its starts to the next iteration
+                g_V().is(MQ_STEP).outE().is(MQ_STEP).filter(__.inE("knows").has("weight", 0)), otherStrategies),
+            // An additional JanusGraphMultiQueryStep for repeat goes before the RepeatEndStep allowing it to feed its starts to the next iteration
             arguments(g.V().outE("knows").inV().repeat(__.outE("knows").inV().has("weight", 0)).times(10),
-                g_V().outE("knows").inV().repeat(__.outE("knows").inV().has("weight", 0).is(MQ_REPEAT)).times(10), otherStrategies),
+                g_V().is(MQ_STEP).outE("knows").inV().is(MQ_STEP).repeat(__.is(MQ_STEP).outE("knows").inV().has("weight", 0)).times(10), otherStrategies),
             // Choose does not have a child traversal of JanusGraphVertexStep so won't benefit from JanusGraphMultiQueryStep(ChooseStep)
             arguments(g.V().choose(has("weight", lt(3)), __.union(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1))),
-                g_V().choose(has("weight", lt(3)), __.is(MQ_UNION).union(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1))), otherStrategies),
+                g_V().is(MQ_STEP).choose(has("weight", lt(3)), __.union(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1))), otherStrategies),
             // Choose now has a child traversal of JanusGraphVertexStep and so will benefit from JanusGraphMultiQueryStep(ChooseStep)
             arguments(g.V().choose(__.union(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1)),__.inE("knows").has("weight", gt(2))),
-                g_V().is(MQ_CHOOSE).choose(__.is(MQ_UNION).union(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1)),__.inE("knows").has("weight", gt(2))), otherStrategies),
+                g_V().is(MQ_STEP).choose(__.union(__.inE("knows").has("weight", 0),__.inE("knows").has("weight", 1)),__.inE("knows").has("weight", gt(2))), otherStrategies),
             // There are 'as' side effect steps preceding the JanusGraphVertexStep
             arguments(g.V().choose(has("weight", 0),__.as("true").inE("knows"),__.as("false").inE("knows")),
-                g_V().is(MQ_CHOOSE).choose(has("weight", 0),__.as("true").inE("knows"),__.as("false").inE("knows")), otherStrategies),
+                g_V().is(MQ_STEP).choose(has("weight", 0),__.as("true").inE("knows"),__.as("false").inE("knows")), otherStrategies),
             // There are 'sideEffect' and 'as' steps preceding the JanusGraphVertexStep
             arguments(g.V().choose(has("weight", 0),__.as("true").sideEffect(i -> {}).inE("knows"),__.as("false").sideEffect(i -> {}).inE("knows")),
-                g_V().is(MQ_CHOOSE).choose(has("weight", 0),__.as("true").sideEffect(i -> {}).inE("knows"),__.as("false").sideEffect(i -> {}).inE("knows")), otherStrategies),
+                g_V().is(MQ_STEP).choose(has("weight", 0),__.as("true").sideEffect(i -> {}).inE("knows"),__.as("false").sideEffect(i -> {}).inE("knows")), otherStrategies),
+            // 'local' is not MultiQueryCompatible (at the moment)
+            arguments(g.V().and(__.inE("knows"), __.inE("knows")),
+                g_V().and(__.is(MQ_STEP).inE("knows"), __.is(MQ_STEP).inE("knows")), otherStrategies),
         });
     }
 }

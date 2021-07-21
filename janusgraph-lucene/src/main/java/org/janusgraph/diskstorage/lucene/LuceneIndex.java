@@ -14,38 +14,52 @@
 
 package org.janusgraph.diskstorage.lucene;
 
-import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
-import org.janusgraph.core.Cardinality;
-import org.janusgraph.core.attribute.Cmp;
-import org.janusgraph.core.attribute.Geo;
-import org.janusgraph.core.attribute.Geoshape;
-import org.janusgraph.core.attribute.Text;
-import org.janusgraph.core.schema.Mapping;
-import org.janusgraph.diskstorage.*;
-import org.janusgraph.diskstorage.configuration.Configuration;
-import org.janusgraph.diskstorage.indexing.*;
-import org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration;
-import org.janusgraph.graphdb.database.serialize.AttributeUtils;
-import org.janusgraph.graphdb.internal.Order;
-import org.janusgraph.graphdb.query.JanusGraphPredicate;
-import org.janusgraph.graphdb.query.condition.*;
-import org.janusgraph.graphdb.types.ParameterType;
-import org.janusgraph.util.system.IOUtils;
-
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Sets;
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.CachingTokenFilter;
+import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
 import org.apache.lucene.analysis.tokenattributes.TermToBytesRefAttribute;
-import org.apache.lucene.document.*;
-import org.apache.lucene.index.*;
-import org.apache.lucene.queryparser.classic.QueryParser;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.DoubleDocValuesField;
+import org.apache.lucene.document.DoublePoint;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.IntPoint;
+import org.apache.lucene.document.LongPoint;
+import org.apache.lucene.document.NumericDocValuesField;
+import org.apache.lucene.document.SortedDocValuesField;
+import org.apache.lucene.document.StoredField;
+import org.apache.lucene.document.StringField;
+import org.apache.lucene.document.TextField;
+import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.IndexNotFoundException;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.IndexableField;
+import org.apache.lucene.index.Term;
 import org.apache.lucene.queryparser.classic.ParseException;
-import org.apache.lucene.search.*;
+import org.apache.lucene.queryparser.classic.QueryParser;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.BooleanQuery.Builder;
+import org.apache.lucene.search.DocValuesFieldExistsQuery;
+import org.apache.lucene.search.FuzzyQuery;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.MatchAllDocsQuery;
+import org.apache.lucene.search.MatchNoDocsQuery;
+import org.apache.lucene.search.NormsFieldExistsQuery;
+import org.apache.lucene.search.PrefixQuery;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.RegexpQuery;
+import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.SortField;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.TermRangeQuery;
+import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.spatial.SpatialStrategy;
 import org.apache.lucene.spatial.prefix.PrefixTreeStrategy;
 import org.apache.lucene.spatial.prefix.RecursivePrefixTreeStrategy;
@@ -57,6 +71,37 @@ import org.apache.lucene.spatial.vector.PointVectorStrategy;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
+import org.janusgraph.core.Cardinality;
+import org.janusgraph.core.attribute.Cmp;
+import org.janusgraph.core.attribute.Geo;
+import org.janusgraph.core.attribute.Geoshape;
+import org.janusgraph.core.attribute.Text;
+import org.janusgraph.core.schema.Mapping;
+import org.janusgraph.diskstorage.BackendException;
+import org.janusgraph.diskstorage.BaseTransaction;
+import org.janusgraph.diskstorage.BaseTransactionConfig;
+import org.janusgraph.diskstorage.BaseTransactionConfigurable;
+import org.janusgraph.diskstorage.PermanentBackendException;
+import org.janusgraph.diskstorage.TemporaryBackendException;
+import org.janusgraph.diskstorage.configuration.Configuration;
+import org.janusgraph.diskstorage.indexing.IndexEntry;
+import org.janusgraph.diskstorage.indexing.IndexFeatures;
+import org.janusgraph.diskstorage.indexing.IndexMutation;
+import org.janusgraph.diskstorage.indexing.IndexProvider;
+import org.janusgraph.diskstorage.indexing.IndexQuery;
+import org.janusgraph.diskstorage.indexing.KeyInformation;
+import org.janusgraph.diskstorage.indexing.RawQuery;
+import org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration;
+import org.janusgraph.graphdb.database.serialize.AttributeUtils;
+import org.janusgraph.graphdb.internal.Order;
+import org.janusgraph.graphdb.query.JanusGraphPredicate;
+import org.janusgraph.graphdb.query.condition.And;
+import org.janusgraph.graphdb.query.condition.Condition;
+import org.janusgraph.graphdb.query.condition.Not;
+import org.janusgraph.graphdb.query.condition.Or;
+import org.janusgraph.graphdb.query.condition.PredicateCondition;
+import org.janusgraph.graphdb.types.ParameterType;
+import org.janusgraph.util.system.IOUtils;
 import org.locationtech.spatial4j.context.SpatialContext;
 import org.locationtech.spatial4j.shape.Shape;
 import org.slf4j.Logger;
@@ -70,7 +115,16 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.AbstractMap.SimpleEntry;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
@@ -433,7 +487,7 @@ public class LuceneIndex implements IndexProvider {
                     throw new IllegalArgumentException("Illegal mapping specified: " + mapping);
             }
         } else if (value instanceof Geoshape) {
-            field = new StoredField(fieldName, GEOID + value.toString());
+            field = new StoredField(fieldName, GEOID + value);
         } else if (value instanceof Date) {
             field = new StoredField(fieldName, (((Date) value).getTime()));
         } else if (value instanceof Instant) {
@@ -748,12 +802,12 @@ public class LuceneIndex implements IndexProvider {
                     } else if (janusgraphPredicate == Cmp.EQUAL || janusgraphPredicate == Cmp.NOT_EQUAL) {
                         tokenize(params, map, delegatingAnalyzer, (String) value, stringFieldKey, janusgraphPredicate);
                     } else if (janusgraphPredicate == Text.FUZZY) {
-                        params.addQuery(new FuzzyQuery(new Term(stringFieldKey, (String) value)));
+                        params.addQuery(new FuzzyQuery(new Term(stringFieldKey, (String) value), Text.getMaxEditDistance((String) value)));
                     } else if (janusgraphPredicate == Text.CONTAINS_FUZZY) {
                         value = ((String) value).toLowerCase();
                         final Builder b = new BooleanQuery.Builder();
                         for (final String term : Text.tokenize((String) value)) {
-                            b.add(new FuzzyQuery(new Term(key, term)), BooleanClause.Occur.MUST);
+                            b.add(new FuzzyQuery(new Term(key, term), Text.getMaxEditDistance(term)), BooleanClause.Occur.MUST);
                         }
                         params.addQuery(b.build());
                     } else
@@ -860,6 +914,30 @@ public class LuceneIndex implements IndexProvider {
                 result.add(new RawQuery.Result<>(field == null ? null : field.stringValue(), docs.scoreDocs[i].score));
             }
             return result.stream();
+        } catch (final IOException e) {
+            throw new TemporaryBackendException("Could not execute Lucene query", e);
+        }
+    }
+
+    @Override
+    public Long queryCount(IndexQuery query, KeyInformation.IndexRetriever information, BaseTransaction tx) throws BackendException {
+        //Construct query
+        final String store = query.getStore();
+        final LuceneCustomAnalyzer delegatingAnalyzer = delegatingAnalyzerFor(store, information);
+        final SearchParams searchParams = convertQuery(query.getCondition(), information.get(store), delegatingAnalyzer);
+
+        try {
+            final IndexSearcher searcher = ((Transaction) tx).getSearcher(query.getStore());
+            if (searcher == null) {
+                return 0L; //Index does not yet exist
+            }
+            Query q = searchParams.getQuery();
+
+            final long time = System.currentTimeMillis();
+            // We ignore offset and limit for totals
+            final TopDocs docs = searcher.search(q, 1);
+            log.debug("Executed query [{}] in {} ms", q, System.currentTimeMillis() - time);
+            return docs.totalHits.value;
         } catch (final IOException e) {
             throw new TemporaryBackendException("Could not execute Lucene query", e);
         }
